@@ -1,0 +1,27 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+
+  <PropertyGroup>
+    <AssemblyName>Ariadne</AssemblyName>
+    <RootNamespace>Ariadne</RootNamespace>
+    <Version>0.1.0</Version>
+    <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+      Pin the output directory. The solution declares an x64 platform, so a solution build lands
+      in bin/x64/<Config>/ while a bare project build lands in bin/<Config>/ — and Dalamud's
+      dev-plugin entry points at exactly one of those. Without this, "dotnet build Ariadne.sln"
+      appears to succeed while the game keeps loading a stale DLL from the other path, which is
+      indistinguishable from a code change having no effect.
+    -->
+    <OutputPath>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+
+  <!-- Allow the test assembly to access internal types -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Ariadne.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

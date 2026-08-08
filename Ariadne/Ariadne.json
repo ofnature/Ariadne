@@ -1,0 +1,20 @@
+{
+  "Author": "ofnature",
+  "Name": "Ariadne",
+  "InternalName": "Ariadne",
+  "Punchline": "Hands your fleet the thread — ready navmeshes the moment a zone loads.",
+  "Description": "Bridge between the game session and Mnemosyne, an out-of-process navmesh cache. Detects zone loads, fetches cached meshes so vnavmesh skips its build, and exposes IPC so other plugins can request meshes or paths directly.",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "RepoUrl": "https://github.com/ofnature/Ariadne",
+  "Tags": [
+    "navmesh",
+    "navigation",
+    "cache",
+    "multibox"
+  ],
+  "CategoryTags": [
+    "utility"
+  ],
+  "LoadPriority": 0
+}

@@ -126,12 +126,13 @@ internal sealed class MeshBroker : IDisposable
 
     private async Task QueryAsync(string cacheKey)
     {
+        var sw = Stopwatch.StartNew();
         var snapshot = await BuildSnapshotAsync(cacheKey).ConfigureAwait(false);
         if (_currentKey != cacheKey)
             return; // zone changed while we were querying — stale result, drop it
 
         Current = snapshot;
-        Activity($"zone '{cacheKey}': {snapshot.Status}");
+        Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
 
         if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);
@@ -157,6 +158,7 @@ internal sealed class MeshBroker : IDisposable
 
     private async Task<bool> SeedAsync(string cacheKey)
     {
+        var sw = Stopwatch.StartNew();
         var sourcePath = Current is { MeshPath: { } p, Status: ZoneMeshStatus.MnemosyneCached } ? p : null;
         if (sourcePath == null)
         {
@@ -171,7 +173,7 @@ internal sealed class MeshBroker : IDisposable
         }
 
         var result = _seeder.Seed(cacheKey, sourcePath);
-        Activity($"seed '{cacheKey}': {result}");
+        Activity($"seed '{cacheKey}': {result} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
 
         if (result == SeedResult.Seeded)
         {

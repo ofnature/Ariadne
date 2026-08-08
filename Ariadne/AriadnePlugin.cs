@@ -31,6 +31,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly AriadneConfig _config;
     private readonly ZoneWatcher _zoneWatcher;
     private readonly MeshBroker _broker;
+    private readonly ReadyTracker _tracker;
     private readonly AriadneIpc _ipc;
     private readonly MainWindow _mainWindow;
 
@@ -49,13 +50,22 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _broker = new MeshBroker(client, new CacheSeeder(vnavCacheDir), vnav,
             () => _config.AutoSeed, m => Log.Information(m));
 
+        _tracker = new ReadyTracker(
+            () => vnav.IsAvailable, () => vnav.IsReady, () => vnav.BuildProgress,
+            () => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
+
         _zoneWatcher = new ZoneWatcher(Framework);
-        _zoneWatcher.KeyChanged += _ => _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+        _zoneWatcher.KeyChanged += _ =>
+        {
+            _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+            _tracker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+        };
+        Framework.Update += OnFrameworkTick;
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey);
 
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _zoneWatcher,
+            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
@@ -74,6 +84,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     public void Dispose()
     {
         CommandManager.RemoveHandler(CommandMain);
+        Framework.Update -= OnFrameworkTick;
         PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
@@ -82,6 +93,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _zoneWatcher.Dispose();
         _broker.Dispose(); // disposes the pipe client
     }
+
+    private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework _) => _tracker.Tick();
 
     private void OnCommand(string command, string args) => OpenMain();
 

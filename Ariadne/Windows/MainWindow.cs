@@ -26,6 +26,7 @@ internal sealed class MainWindow : Window
     private readonly MeshBroker _broker;
     private readonly VnavIpc _vnav;
     private readonly ZoneWatcher _zoneWatcher;
+    private readonly ReadyTracker _tracker;
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
@@ -38,6 +39,7 @@ internal sealed class MainWindow : Window
         MeshBroker broker,
         VnavIpc vnav,
         ZoneWatcher zoneWatcher,
+        ReadyTracker tracker,
         Func<Vector3?> playerPosition)
         : base("Ariadne##AriadneMain", ImGuiWindowFlags.NoCollapse)
     {
@@ -46,6 +48,7 @@ internal sealed class MainWindow : Window
         _broker = broker;
         _vnav = vnav;
         _zoneWatcher = zoneWatcher;
+        _tracker = tracker;
         _playerPosition = playerPosition;
 
         Size = new Vector2(560, 480);
@@ -63,6 +66,7 @@ internal sealed class MainWindow : Window
         DrawZone();
         DrawVnavmesh();
         DrawActions();
+        DrawTimings();
         DrawActivity();
     }
 
@@ -176,6 +180,60 @@ internal sealed class MainWindow : Window
         }
         ImGui.Separator();
     }
+
+    private void DrawTimings()
+    {
+        ImGui.TextUnformatted("Mesh ready times");
+        if (_tracker.InProgress is { } live)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(Yellow, live.MaxProgress > 0.02f
+                ? $"building… {live.Elapsed:0.0}s ({live.MaxProgress * 100:0}%)"
+                : $"loading… {live.Elapsed:0.0}s");
+        }
+
+        var history = _tracker.History;
+        if (history.Length == 0)
+        {
+            ImGui.TextColored(Grey, "no zones measured yet");
+            ImGui.Separator();
+            return;
+        }
+
+        if (ImGui.BeginTable("##timings", 4, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg))
+        {
+            ImGui.TableSetupColumn("when", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("zone");
+            ImGui.TableSetupColumn("outcome", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("time", ImGuiTableColumnFlags.WidthFixed, 60);
+            foreach (var t in history)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.TextColored(Grey, $"{t.When:HH:mm:ss}");
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted(t.CacheKey);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(t.CacheKey);
+                ImGui.TableNextColumn();
+                if (t.Built)
+                    ImGui.TextColored(Red, "built");
+                else
+                    ImGui.TextColored(Green, "cache load");
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted(FormatDuration(t.Seconds));
+            }
+            ImGui.EndTable();
+        }
+        ImGui.Separator();
+    }
+
+    private static string FormatDuration(double seconds) => seconds switch
+    {
+        < 10 => $"{seconds:0.00}s",
+        < 120 => $"{seconds:0.0}s",
+        _ => $"{(int)seconds / 60}m{(int)seconds % 60:00}s",
+    };
 
     private void DrawActivity()
     {

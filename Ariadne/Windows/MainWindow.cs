@@ -27,6 +27,7 @@ internal sealed class MainWindow : Window
     private readonly VnavIpc _vnav;
     private readonly ZoneWatcher _zoneWatcher;
     private readonly ReadyTracker _tracker;
+    private readonly GameStatePusher _pusher;
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
@@ -40,8 +41,9 @@ internal sealed class MainWindow : Window
         VnavIpc vnav,
         ZoneWatcher zoneWatcher,
         ReadyTracker tracker,
+        GameStatePusher pusher,
         Func<Vector3?> playerPosition)
-        : base("Ariadne##AriadneMain", ImGuiWindowFlags.NoCollapse)
+        : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
         _config = config;
         _saveConfig = saveConfig;
@@ -49,6 +51,7 @@ internal sealed class MainWindow : Window
         _vnav = vnav;
         _zoneWatcher = zoneWatcher;
         _tracker = tracker;
+        _pusher = pusher;
         _playerPosition = playerPosition;
 
         Size = new Vector2(560, 480);
@@ -78,6 +81,13 @@ internal sealed class MainWindow : Window
             ImGui.TextColored(Green, $"connected — {_broker.MnemosyneApp}");
         else
             ImGui.TextColored(Red, "disconnected (start Mnemosyne or the stub; reconnects automatically)");
+
+        ImGui.TextColored(Grey, "game link");
+        ImGui.SameLine(90);
+        if (_pusher.IsActive && _broker.MnemosyneConnected)
+            ImGui.TextColored(Green, "pushing player position (~10 Hz)");
+        else
+            ImGui.TextColored(Grey, "idle (no player, zone loading, or Mnemosyne away)");
         ImGui.Separator();
     }
 

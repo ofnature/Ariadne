@@ -67,6 +67,19 @@ internal sealed class MnemosyneClient : IDisposable
     public Task<Response?> NotifyMeshBuiltAsync(string cacheKey, string path, CancellationToken cancel = default)
         => SendAsync<Response>(new Request { Op = "notifyMeshBuilt", CacheKey = cacheKey, Path = path }, cancel);
 
+    /// <summary>Best-effort ~10 Hz player-position push for Mnemosyne's viewer; dropped
+    /// samples are harmless (server keeps only the latest).</summary>
+    public Task<Response?> UpdateGameStateAsync(string cacheKey, uint territoryId, float[] pos, float rotation, bool flying, CancellationToken cancel = default)
+        => SendAsync<Response>(new Request
+        {
+            Op = "updateGameState",
+            CacheKey = cacheKey,
+            TerritoryId = territoryId,
+            Pos = pos,
+            Rotation = rotation,
+            Flying = flying,
+        }, cancel);
+
     private async Task<TResp?> SendAsync<TResp>(Request request, CancellationToken cancel) where TResp : Response
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token, cancel);

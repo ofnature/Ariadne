@@ -56,6 +56,20 @@ Ariadne-side push when it observes vnavmesh finish a fresh build, so Mnemosyne i
 without waiting on its FileSystemWatcher debounce. Idempotent; Mnemosyne may ignore
 duplicates.
 
+### `updateGameState`
+`{ cacheKey, territoryId, pos: [x,y,z], rotation: <yaw radians>, flying: bool }` → `{ ok }`
+Ariadne-side push, ~10 Hz while a player is loaded into a zone: the player's live
+position for Mnemosyne's viewer (player marker, camera follow, auto zone switch).
+`cacheKey` is the zone's exact vnavmesh cache key as Ariadne computes it in-game;
+`rotation` is character yaw in radians. Server keeps only the latest sample. Send
+best-effort; dropped samples are harmless.
+
+### `getGameState`
+→ `{ ok, present: bool, cacheKey, territoryId, pos, rotation, flying, ageMs }`
+Latest pushed game state. `present: false` when nothing has been pushed yet or the
+last sample is stale (> 5 s old — treat as "player logged out / Ariadne gone");
+the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
+
 ## Error/liveness conventions
 
 - Malformed JSON line: server drops the connection (client treats as pipe loss).

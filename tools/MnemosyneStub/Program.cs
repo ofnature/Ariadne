@@ -31,6 +31,10 @@ var json = new JsonSerializerOptions
 
 Console.WriteLine($"mnemosyne-stub serving '{meshDir}' on \\\\.\\pipe\\{PipeName}");
 
+var gameStateLock = new object();
+JsonElement? gameState = null;
+var gameStateAt = DateTime.MinValue;
+
 while (true)
 {
     var server = new NamedPipeServerStream(PipeName, PipeDirection.InOut,
@@ -133,6 +137,34 @@ object Handle(JsonElement req)
         case "notifyMeshBuilt":
             Console.WriteLine($"  notifyMeshBuilt: {req}");
             return new { id, ok = true };
+
+        case "updateGameState":
+            lock (gameStateLock)
+            {
+                gameState = req.Clone();
+                gameStateAt = DateTime.UtcNow;
+            }
+            return new { id, ok = true };
+
+        case "getGameState":
+            lock (gameStateLock)
+            {
+                var age = (DateTime.UtcNow - gameStateAt).TotalMilliseconds;
+                if (gameState is not { } gs || age > 5000)
+                    return new { id, ok = true, present = false };
+                return new
+                {
+                    id,
+                    ok = true,
+                    present = true,
+                    cacheKey = gs.GetProperty("cacheKey").GetString(),
+                    territoryId = gs.TryGetProperty("territoryId", out var t) ? t.GetUInt32() : 0,
+                    pos = gs.TryGetProperty("pos", out var pos) ? JsonSerializer.Deserialize<float[]>(pos) : null,
+                    rotation = gs.TryGetProperty("rotation", out var r) ? r.GetSingle() : 0f,
+                    flying = gs.TryGetProperty("flying", out var f) && f.GetBoolean(),
+                    ageMs = (int)age,
+                };
+            }
 
         default:
             return new { id, ok = false, error = $"unknown op '{op}'" };

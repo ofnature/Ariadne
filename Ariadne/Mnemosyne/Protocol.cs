@@ -28,6 +28,12 @@ internal sealed class Request
     public float[]? From { get; set; }
     public float[]? To { get; set; }
     public bool? Fly { get; set; }
+
+    // updateGameState fields
+    public uint? TerritoryId { get; set; }
+    public float[]? Pos { get; set; }
+    public float? Rotation { get; set; }
+    public bool? Flying { get; set; }
 }
 
 internal class Response

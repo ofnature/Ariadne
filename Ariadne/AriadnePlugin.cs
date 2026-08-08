@@ -4,6 +4,7 @@ using Ariadne.Mnemosyne;
 using Ariadne.Seeding;
 using Ariadne.Windows;
 using Ariadne.Zone;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
@@ -32,6 +33,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly ZoneWatcher _zoneWatcher;
     private readonly MeshBroker _broker;
     private readonly ReadyTracker _tracker;
+    private readonly GameStatePusher _pusher;
     private readonly AriadneIpc _ipc;
     private readonly MainWindow _mainWindow;
 
@@ -62,10 +64,13 @@ public sealed class AriadnePlugin : IDalamudPlugin
         };
         Framework.Update += OnFrameworkTick;
 
+        _pusher = new GameStatePusher(SampleGameState,
+            s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying));
+
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey);
 
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker,
+            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
@@ -94,7 +99,24 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _broker.Dispose(); // disposes the pipe client
     }
 
-    private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework _) => _tracker.Tick();
+    private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework _)
+    {
+        _tracker.Tick();
+        _pusher.Tick();
+    }
+
+    // Runs on the framework thread (safe to touch game state); null while loading or logged out.
+    private GameStateSample? SampleGameState()
+    {
+        var cacheKey = _zoneWatcher.CurrentCacheKey;
+        if (cacheKey.Length == 0)
+            return null;
+        var player = ObjectTable.LocalPlayer;
+        if (player == null)
+            return null;
+        return new GameStateSample(cacheKey, ClientState.TerritoryType, player.Position, player.Rotation,
+            Condition[ConditionFlag.InFlight] || Condition[ConditionFlag.Diving]);
+    }
 
     private void OnCommand(string command, string args) => OpenMain();
 

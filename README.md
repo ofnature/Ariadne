@@ -12,7 +12,8 @@ directly.
 Ariadne didn't slay anything in the labyrinth — she just made sure the one who did never
 had to rediscover the way. Same job here.
 
-> **Status: early development.** Zone detection scaffold; no mesh logic yet.
+> **Status: early development.** Zone detection, Mnemosyne round-trip, cache seeding, and
+> the consumer IPC surface work against a stub server; real Mnemosyne integration pending.
 
 ## How it fits together
 
@@ -23,9 +24,18 @@ had to rediscover the way. Same job here.
 | **Ariadne** | In-game bridge: zone detection, cache seeding, consumer IPC |
 | [Theseus](https://github.com/ofnature/Theseus) | Downstream consumer (dungeon running) |
 
-## IPC (planned)
+## IPC
 
-`Ariadne.IsConnected`, `Ariadne.CurrentCacheKey`, `Ariadne.ZoneStatus`,
-`Ariadne.RequestMesh`, `Ariadne.SeedVnavCache`, `Ariadne.FindPath`.
+| Name | Signature | Notes |
+|---|---|---|
+| `Ariadne.IsConnected` | `() → bool` | pipe to Mnemosyne alive |
+| `Ariadne.CurrentCacheKey` | `() → string` | `""` while the layout is loading |
+| `Ariadne.ZoneStatus` | `() → int` | 0 NotReady, 1 MnemosyneUnavailable, 2 LocalCurrent, 3 MnemosyneCached, 4 Missing |
+| `Ariadne.RequestMesh` | `() → Task<string>` | path to a current mesh file for this zone, or `""` |
+| `Ariadne.SeedVnavCache` | `() → Task<bool>` | put the mesh into vnavmesh's cache (reload-nudges if a build already started) |
+| `Ariadne.FindPath` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | proxied to Mnemosyne; runs on the raw cached mesh (no festival customization / reachability pruning) |
+
+`/ariadne` opens the status window: connection state, zone mesh status, vnavmesh build
+progress, manual seed/reload/pathfind actions, and an activity log.
 
 The Mnemosyne wire protocol is specified in [docs/mnemosyne-protocol.md](docs/mnemosyne-protocol.md).

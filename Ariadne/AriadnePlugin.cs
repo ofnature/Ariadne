@@ -1,11 +1,14 @@
+using Ariadne.Config;
+using Ariadne.Ipc;
 using Ariadne.Mnemosyne;
 using Ariadne.Seeding;
+using Ariadne.Windows;
 using Ariadne.Zone;
 using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
-using System.Diagnostics;
+using System.IO;
 using System.Reflection;
-using System.Threading.Tasks;
 using static Ariadne.Service;
 
 namespace Ariadne;
@@ -13,8 +16,9 @@ namespace Ariadne;
 /// <summary>
 /// Ariadne — bridge between the game session and Mnemosyne's out-of-process navmesh cache.
 ///
-/// <para>Milestone 2: zone detection + Mnemosyne round-trip, log-only. Design and phased
-/// scope live in <c>PLAN.md</c> at the repo root (local-only).</para>
+/// <para>Zone changes flow: ZoneWatcher → MeshBroker (Mnemosyne query → auto-seed →
+/// vnavmesh reload nudge). Consumers use the <c>Ariadne.*</c> IPC surface. Design and
+/// phased scope live in <c>PLAN.md</c> at the repo root (local-only).</para>
 /// </summary>
 public sealed class AriadnePlugin : IDalamudPlugin
 {
@@ -23,82 +27,65 @@ public sealed class AriadnePlugin : IDalamudPlugin
     public static string PluginVersion { get; } =
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
+    private readonly WindowSystem _windowSystem = new("Ariadne");
+    private readonly AriadneConfig _config;
     private readonly ZoneWatcher _zoneWatcher;
-    private readonly MnemosyneClient _mnemosyne;
+    private readonly MeshBroker _broker;
+    private readonly AriadneIpc _ipc;
+    private readonly MainWindow _mainWindow;
 
     public AriadnePlugin(IDalamudPluginInterface pluginInterface)
     {
         pluginInterface.Create<Service>();
 
-        _mnemosyne = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m));
+        _config = PluginInterface.GetPluginConfig() as AriadneConfig ?? new AriadneConfig();
+
+        // vnavmesh's meshcache is a sibling of our own config directory
+        var vnavCacheDir = Path.Combine(
+            PluginInterface.ConfigDirectory.Parent!.FullName, "vnavmesh", "meshcache");
+
+        var client = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m));
+        var vnav = new VnavIpc(PluginInterface, m => Log.Information(m));
+        _broker = new MeshBroker(client, new CacheSeeder(vnavCacheDir), vnav,
+            () => _config.AutoSeed, m => Log.Information(m));
+
         _zoneWatcher = new ZoneWatcher(Framework);
-        _zoneWatcher.KeyChanged += OnKeyChanged;
+        _zoneWatcher.KeyChanged += _ => _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+
+        _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey);
+
+        _mainWindow = new MainWindow(
+            _config, SaveConfig, _broker, vnav, _zoneWatcher,
+            () => ObjectTable.LocalPlayer?.Position);
+        _windowSystem.AddWindow(_mainWindow);
+
+        PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
+        PluginInterface.UiBuilder.OpenMainUi += OpenMain;
+        PluginInterface.UiBuilder.OpenConfigUi += OpenMain;
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Print the current zone layout key and mesh cache key.",
+            HelpMessage = "Open the Ariadne status window.",
         });
 
-        Log.Information($"Ariadne v{PluginVersion} loaded.");
+        Log.Information($"Ariadne v{PluginVersion} loaded (vnav cache: {vnavCacheDir}).");
     }
 
     public void Dispose()
     {
         CommandManager.RemoveHandler(CommandMain);
-        _zoneWatcher.KeyChanged -= OnKeyChanged;
+        PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
+        PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
+        PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
+        _windowSystem.RemoveAllWindows();
+        _ipc.Dispose();
         _zoneWatcher.Dispose();
-        _mnemosyne.Dispose();
+        _broker.Dispose(); // disposes the pipe client
     }
 
-    private void OnKeyChanged(string key)
-    {
-        if (key.Length == 0)
-            return;
-        var cacheKey = _zoneWatcher.CurrentCacheKey;
-        _ = Task.Run(() => QueryMnemosyneAsync(cacheKey));
-    }
+    private void OnCommand(string command, string args) => OpenMain();
 
-    // Milestone 2: ask Mnemosyne about the zone and log the round-trip. Seeding comes later.
-    private async Task QueryMnemosyneAsync(string cacheKey)
-    {
-        var sw = Stopwatch.StartNew();
-        var status = await _mnemosyne.ZoneStatusAsync(cacheKey);
-        if (status == null)
-        {
-            Log.Information($"[Mnemosyne] '{cacheKey}': unavailable ({sw.ElapsedMilliseconds}ms)");
-            return;
-        }
+    private void OpenMain() => _mainWindow.IsOpen = true;
 
-        Log.Information($"[Mnemosyne] '{cacheKey}': {status.Status} v{status.Version} cust{status.Customization} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
-        if (status.Status != "cached")
-            return;
-
-        sw.Restart();
-        var mesh = await _mnemosyne.GetMeshAsync(cacheKey);
-        if (mesh is not { Ok: true } || mesh.Path == null)
-        {
-            Log.Information($"[Mnemosyne] getMesh failed: {mesh?.Error ?? "unavailable"}");
-            return;
-        }
-
-        // never trust the server's word for it — the header is what vnavmesh will judge
-        if (!NavmeshHeader.TryRead(mesh.Path, out var header) || !header.IsCurrent)
-        {
-            Log.Warning($"[Mnemosyne] getMesh returned unusable file (magic {header.Magic:X8}, v{header.Version}): '{mesh.Path}'");
-            return;
-        }
-
-        Log.Information($"[Mnemosyne] getMesh: '{mesh.Path}' v{header.Version} cust{header.Customization} ({mesh.Size} bytes, {sw.Elapsed.TotalMilliseconds:0.0}ms)");
-    }
-
-    private void OnCommand(string command, string args)
-    {
-        var key = _zoneWatcher.CurrentKey;
-        var cacheKey = _zoneWatcher.CurrentCacheKey;
-        var mnemosyne = _mnemosyne.IsConnected ? $"connected ({_mnemosyne.ServerApp})" : "disconnected";
-        ChatGui.Print(key.Length > 0
-            ? $"[Ariadne] layout key: {key}\n[Ariadne] cache key: {cacheKey}\n[Ariadne] Mnemosyne: {mnemosyne}"
-            : $"[Ariadne] layout not ready (loading, or watcher disabled — see /xllog).\n[Ariadne] Mnemosyne: {mnemosyne}");
-        Log.Information($"[Command] key='{key}' cacheKey='{cacheKey}' mnemosyne={mnemosyne}");
-    }
+    private void SaveConfig() => PluginInterface.SavePluginConfig(_config);
 }

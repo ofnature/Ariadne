@@ -108,3 +108,11 @@ the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
   cached zone into a `missing` answer (Ariadne retries negative answers ×3 with backoff;
   Mnemosyne's `IsCurrentMeshFile` swallowing `IOException` → `false` is the server-side
   spot to harden).
+
+  **RESOLVED Mnemosyne-side 2026-08-09**: all mesh-file reads (MeshCache header/load,
+  FastCache segments) now open with `FileShare.ReadWrite | FileShare.Delete`, read bytes
+  in a short window and close BEFORE parsing (no handle held across a zone load — the
+  viewer's exclusive-hold-for-the-whole-load behavior is gone), and transient
+  `IOException`s retry 3× with 150 ms backoff before any negative answer. Verified by
+  re-running the repro: a 250 ms exclusive hold on the built-store file now answers
+  `zoneStatus: cached` (retry absorbs the hold) instead of `missing`.

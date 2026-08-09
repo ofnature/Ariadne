@@ -90,7 +90,10 @@ the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
   reconnect needs no session re-establishment beyond `hello`.
 - Long ops (`findPath` on cold mesh may need a load): server should still answer other
   pipelined requests; a client-side timeout of 10s per request is reasonable.
-- **Zone entry is peak file contention** (observed 2026-08-08 in the first seed A/B run):
+- **Zone entry is peak file contention** (CONFIRMED 2026-08-09: holding the built-store
+  file with `FileShare.None` and probing `zoneStatus` flips the answer to `missing`;
+  releasing flips it back to `cached` — the viewer's auto-zone-switch load is the natural
+  holder at exactly the moment Ariadne queries):
   the moment a player zones in, vnavmesh may be writing its cache file, the viewer may be
   auto-loading the same zone off the `updateGameState` push, and Ariadne is validating —
   all against the same paths. Both sides must treat a transient `IOException` as

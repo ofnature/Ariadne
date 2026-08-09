@@ -136,12 +136,18 @@ internal sealed class MeshBroker : IDisposable
                 return; // zone changed while we were querying — stale result, drop it
 
             // Zone entry is peak contention on the mesh file: vnavmesh kicking its build,
-            // Mnemosyne's viewer auto-loading the same zone off the player push. A sharing
-            // violation anywhere in that chain reads as a one-shot "missing" (observed in
-            // the first A/B run), so re-ask before believing a negative first answer.
-            if (snapshot.Status is not (ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable) || attempt >= 3)
+            // Mnemosyne's viewer auto-loading the same zone off the player push. An
+            // exclusive hold anywhere in that chain makes the server honestly answer
+            // "missing" (proven by locking the file and probing), and a viewer load can
+            // outlast a fixed retry window. So: a few quick retries always, and while
+            // vnavmesh is still building keep asking — a seed stays profitable for the
+            // whole build, since the Nav.Reload nudge converts it to a cache load.
+            if (snapshot.Status is not (ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable))
                 break;
-            await Task.Delay(TimeSpan.FromSeconds(attempt)).ConfigureAwait(false);
+            var buildRunning = _vnav.IsAvailable && _vnav.BuildProgress >= 0;
+            if ((attempt >= 3 && !buildRunning) || attempt >= 90)
+                break;
+            await Task.Delay(TimeSpan.FromSeconds(Math.Min(attempt, 2))).ConfigureAwait(false);
             if (_currentKey != cacheKey)
                 return;
             attempt++;

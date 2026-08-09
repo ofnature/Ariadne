@@ -127,12 +127,28 @@ internal sealed class MeshBroker : IDisposable
     private async Task QueryAsync(string cacheKey)
     {
         var sw = Stopwatch.StartNew();
-        var snapshot = await BuildSnapshotAsync(cacheKey).ConfigureAwait(false);
-        if (_currentKey != cacheKey)
-            return; // zone changed while we were querying — stale result, drop it
+        Snapshot snapshot;
+        var attempt = 1;
+        while (true)
+        {
+            snapshot = await BuildSnapshotAsync(cacheKey).ConfigureAwait(false);
+            if (_currentKey != cacheKey)
+                return; // zone changed while we were querying — stale result, drop it
+
+            // Zone entry is peak contention on the mesh file: vnavmesh kicking its build,
+            // Mnemosyne's viewer auto-loading the same zone off the player push. A sharing
+            // violation anywhere in that chain reads as a one-shot "missing" (observed in
+            // the first A/B run), so re-ask before believing a negative first answer.
+            if (snapshot.Status is not (ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable) || attempt >= 3)
+                break;
+            await Task.Delay(TimeSpan.FromSeconds(attempt)).ConfigureAwait(false);
+            if (_currentKey != cacheKey)
+                return;
+            attempt++;
+        }
 
         Current = snapshot;
-        Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
+        Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms{(attempt > 1 ? $", attempt {attempt}" : "")})");
 
         if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);

@@ -44,6 +44,15 @@ or `ok:false` if missing/stale. Path must stay valid until overwritten by a newe
 the same key; Ariadne copies immediately. (Future remote: same op, `data` field instead of
 `path`.)
 
+**Builder fallback** (server-side, since 2026-08-08): when a zone is absent from
+vnavmesh's cache, Mnemosyne may build it from game files itself and serve the result from
+its own store (`%APPDATA%\Mnemosyne\built`). Consequences for clients: `getMesh` and
+`findPath` can block for a cold build (~10-30 s — treat a timeout as retryable, the build
+continues server-side); `zoneStatus` reports `cached` when either vnavmesh's file or a
+current built file exists. vnavmesh's cache always wins when both exist. Built meshes are
+baseline (no festivals, shared groups in default state) and lack vnavmesh's per-zone
+customizations.
+
 ### `findPath`
 `{ cacheKey, from: [x,y,z], to: [x,y,z], fly: bool }`
 → `{ ok, waypoints: [ [x,y,z], ... ], partial: bool }` or `ok:false` with error (no mesh,
@@ -81,3 +90,12 @@ the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
   reconnect needs no session re-establishment beyond `hello`.
 - Long ops (`findPath` on cold mesh may need a load): server should still answer other
   pipelined requests; a client-side timeout of 10s per request is reasonable.
+- **Zone entry is peak file contention** (observed 2026-08-08 in the first seed A/B run):
+  the moment a player zones in, vnavmesh may be writing its cache file, the viewer may be
+  auto-loading the same zone off the `updateGameState` push, and Ariadne is validating —
+  all against the same paths. Both sides must treat a transient `IOException` as
+  retryable, not as "missing": open mesh files for reading with
+  `FileShare.ReadWrite | FileShare.Delete`, and don't let a single failed open turn a
+  cached zone into a `missing` answer (Ariadne retries negative answers ×3 with backoff;
+  Mnemosyne's `IsCurrentMeshFile` swallowing `IOException` → `false` is the server-side
+  spot to harden).

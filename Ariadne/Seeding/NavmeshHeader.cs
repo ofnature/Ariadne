@@ -24,7 +24,10 @@ internal readonly record struct NavmeshHeader(uint Magic, int Version, int Custo
         header = default;
         try
         {
-            using var stream = File.OpenRead(path);
+            // Maximally permissive share: this runs while other processes may hold the file
+            // for writing (vnavmesh finishing a build, Mnemosyne staging) — File.OpenRead's
+            // FileShare.Read would refuse to coexist with any writer.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new BinaryReader(stream);
             header = new NavmeshHeader(reader.ReadUInt32(), (int)reader.ReadUInt32(), reader.ReadInt32());
             return true;

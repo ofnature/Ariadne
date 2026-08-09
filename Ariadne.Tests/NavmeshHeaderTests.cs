@@ -68,4 +68,15 @@ public class NavmeshHeaderTests : IDisposable
     {
         Assert.False(NavmeshHeader.TryRead(Path.Combine(_dir, "does-not-exist.navmesh"), out _));
     }
+
+    [Fact]
+    public void FileHeldByWriter_StillReadable()
+    {
+        // Zone entry has vnavmesh/Mnemosyne writing mesh files while we validate them;
+        // a File.OpenRead-style share (readers only) cannot coexist with a live writer.
+        var path = WriteFile(U32(NavmeshHeader.ExpectedMagic), U32(25), U32(0));
+        using var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read);
+        Assert.True(NavmeshHeader.TryRead(path, out var header));
+        Assert.True(header.IsCurrent);
+    }
 }

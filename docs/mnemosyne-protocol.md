@@ -46,9 +46,13 @@ the same key; Ariadne copies immediately. (Future remote: same op, `data` field 
 
 ### `findPath`
 `{ cacheKey, from: [x,y,z], to: [x,y,z], fly: bool }`
-→ `{ ok, waypoints: [ [x,y,z], ... ] }` or `ok:false` with error (no mesh, no path).
-Game/world coordinates, Y-up, identical to vnavmesh's `Nav.Pathfind`. **Known divergence**:
-runs on the raw cached mesh — no per-festival `CustomizeMesh`, no flood-fill pruning.
+→ `{ ok, waypoints: [ [x,y,z], ... ], partial: bool }` or `ok:false` with error (no mesh,
+no path). Game/world coordinates, Y-up, identical to vnavmesh's `Nav.Pathfind`.
+`partial: true` means the path stops short of `to` — for walk, disconnected mesh; for
+fly, the server's voxel-search step budget was exhausted (long open-air hops): follow the
+returned waypoints and re-query from the last one (receding horizon). **Known
+divergence**: runs on the raw cached mesh — no per-festival `CustomizeMesh`, no
+flood-fill pruning.
 
 ### `notifyMeshBuilt`
 `{ cacheKey, path }` → `{ ok }`

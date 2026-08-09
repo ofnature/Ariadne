@@ -53,6 +53,11 @@ internal sealed class GameStatePusher
             {
                 await _send(sample).ConfigureAwait(false);
             }
+            catch
+            {
+                // best-effort push: the client already logs/degrades, and a fault here
+                // would otherwise surface as an unobserved task exception every 100 ms
+            }
             finally
             {
                 Volatile.Write(ref _inFlight, 0);

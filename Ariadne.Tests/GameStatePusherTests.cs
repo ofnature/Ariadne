@@ -70,6 +70,28 @@ public class GameStatePusherTests
     }
 
     [Fact]
+    public void ThrowingSend_ReleasesInFlightAndKeepsPushing()
+    {
+        long now = 0;
+        var attempts = 0;
+        var pusher = new GameStatePusher(
+            () => Sample(),
+            _ => { Interlocked.Increment(ref attempts); throw new IOException("Pipe is broken."); },
+            () => now);
+
+        pusher.Tick();
+        SpinWait.SpinUntil(() => Volatile.Read(ref attempts) == 1, 1000);
+
+        now += 200;
+        SpinWait.SpinUntil(() =>
+        {
+            pusher.Tick();
+            return Volatile.Read(ref attempts) >= 2; // the failed send released its slot
+        }, 1000);
+        Assert.True(Volatile.Read(ref attempts) >= 2);
+    }
+
+    [Fact]
     public void IsActive_ReflectsRecentPushes()
     {
         long now = 0;

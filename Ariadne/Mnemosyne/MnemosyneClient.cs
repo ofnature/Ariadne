@@ -93,6 +93,11 @@ internal sealed class MnemosyneClient : IDisposable
         }
         catch (OperationCanceledException)
         {
+            // A request timeout usually means the server went away but the pipe handle is a
+            // zombie (IsConnected stays true until an I/O op fails, and writes can buffer
+            // silently) - without dropping, every later request hangs for the full timeout
+            // and the client never reconnects. Drop is idempotent, so the dispose path is fine.
+            Drop();
             return null;
         }
         catch (Exception ex)
@@ -180,10 +185,15 @@ internal sealed class MnemosyneClient : IDisposable
 
     private void Drop()
     {
+        // Every disposal here can itself throw on a broken pipe — StreamWriter.Dispose
+        // flushes, and flushing a dead pipe raises IOException. Drop runs precisely when
+        // the connection is broken, so swallowing these is correct, and letting them out
+        // was a real bug: it faulted the pusher's fire-and-forget task at 10 Hz and made
+        // plugin Dispose fail ("unload error") when the client was torn down mid-outage.
         ServerApp = null;
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
+        try { _writer?.Dispose(); } catch { }
+        try { _reader?.Dispose(); } catch { }
+        try { _pipe?.Dispose(); } catch { }
         _reader = null;
         _writer = null;
         _pipe = null;

@@ -93,7 +93,13 @@ the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
 - **Zone entry is peak file contention** (CONFIRMED 2026-08-09: holding the built-store
   file with `FileShare.None` and probing `zoneStatus` flips the answer to `missing`;
   releasing flips it back to `cached` — the viewer's auto-zone-switch load is the natural
-  holder at exactly the moment Ariadne queries):
+  holder at exactly the moment Ariadne queries. Second finding, same night: the hold
+  lasts the viewer's ENTIRE zone load, which spans vnavmesh's whole build — Ariadne
+  retried for 11 s and never got a positive answer, so client-side retries cannot solve
+  this. The fix has to be the holder's: **the viewer's loader must open `.navmesh` files
+  with `FileShare.Read` — or read-bytes-then-close — never an exclusive handle held for
+  the whole load**; while the handle is exclusive, serving *and* copying are both
+  impossible for everyone else):
   the moment a player zones in, vnavmesh may be writing its cache file, the viewer may be
   auto-loading the same zone off the `updateGameState` push, and Ariadne is validating —
   all against the same paths. Both sides must treat a transient `IOException` as

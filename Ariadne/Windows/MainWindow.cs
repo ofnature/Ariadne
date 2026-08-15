@@ -234,6 +234,12 @@ internal sealed class MainWindow : Window
             var retries = _config.StallRetries;
             if (ImGui.InputInt("retries", ref retries)) { _config.StallRetries = Math.Clamp(retries, 0, 20); _saveConfig(); }
         }
+        var mirror = _config.MirrorVnavPathIsRunning;
+        if (ImGui.Checkbox("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", ref mirror))
+        {
+            _config.MirrorVnavPathIsRunning = mirror;
+            _saveConfig();
+        }
         ImGui.Separator();
     }
 

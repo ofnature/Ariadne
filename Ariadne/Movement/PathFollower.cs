@@ -30,20 +30,23 @@ internal sealed class PathFollower : IDisposable
     private readonly AriadneConfig _config;
     private readonly OverrideCamera _camera = new();
     private readonly OverrideMovement _movement = new();
+    private readonly PathIsRunningSignal _signal;
     private readonly List<Vector3> _waypoints = [];
     private readonly StallDetector _stall;
 
     private Vector3? _posPreviousFrame;
     private DateTime _nextJump;
 
-    public PathFollower(AriadneConfig config)
+    public PathFollower(AriadneConfig config, PathIsRunningSignal signal)
     {
         _config = config;
+        _signal = signal;
         _stall = new StallDetector(config.StallMinProgress, config.StallWindowMs);
     }
 
     public void Dispose()
     {
+        _signal.Set(false);
         _camera.Dispose();
         _movement.Dispose();
     }
@@ -55,12 +58,14 @@ internal sealed class PathFollower : IDisposable
         IgnoreDeltaY = !fly;
         DestinationTolerance = destinationTolerance;
         _stall.Reset();
+        _signal.Set(_waypoints.Count > 0);
     }
 
     public void Stop()
     {
         _waypoints.Clear();
         _stall.Reset();
+        _signal.Set(false);
     }
 
     public void Update(IFramework fwk)
@@ -77,6 +82,7 @@ internal sealed class PathFollower : IDisposable
             _movement.Enabled = _camera.Enabled = false;
             _camera.SpeedH = _camera.SpeedV = default;
             _movement.DesiredPosition = player.Position;
+            _signal.Set(false); // path finished naturally (Advance emptied it)
             return;
         }
 

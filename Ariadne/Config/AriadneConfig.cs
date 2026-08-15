@@ -29,4 +29,10 @@ public sealed class AriadneConfig : IPluginConfiguration
     public int StallWindowMs { get; set; } = 1500;
     /// <summary>Re-path attempts before giving up on a stalled move.</summary>
     public int StallRetries { get; set; } = 3;
+
+    /// <summary>Also publish the shared-data flag under vnavmesh's name
+    /// (<c>vnav.PathIsRunning</c>) so plugins that yield movement to vnavmesh — BossMod's
+    /// "someone else is driving" check — yield to Ariadne unmodified. Ariadne's own
+    /// <c>ariadne.PathIsRunning</c> is always published.</summary>
+    public bool MirrorVnavPathIsRunning { get; set; } = true;
 }

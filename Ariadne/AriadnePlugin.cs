@@ -35,6 +35,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly MeshBroker _broker;
     private readonly ReadyTracker _tracker;
     private readonly GameStatePusher _pusher;
+    private readonly PathIsRunningSignal _signal;
     private readonly PathFollower _follower;
     private readonly MoveRequest _move;
     private readonly AriadneIpc _ipc;
@@ -70,7 +71,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _pusher = new GameStatePusher(SampleGameState,
             s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying));
 
-        _follower = new PathFollower(_config);
+        _signal = new PathIsRunningSignal(PluginInterface, () => _config.MirrorVnavPathIsRunning);
+        _follower = new PathFollower(_config, _signal);
         _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position, m => Log.Information(m));
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move);
@@ -103,6 +105,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _ipc.Dispose();
         _move.Dispose();
         _follower.Dispose(); // unhooks movement/camera
+        _signal.Dispose();   // clears + relinquishes shared-data flags
         _zoneWatcher.Dispose();
         _broker.Dispose(); // disposes the pipe client
     }

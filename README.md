@@ -44,7 +44,11 @@ had to rediscover the way. Same job here.
 | `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | |
 
 Movement gates mirror vnavmesh's `Path.*` / `SimpleMove.*` shapes so consumers can switch
-by renaming the prefix.
+by renaming the prefix. While following a path Ariadne publishes the shared-data flag
+`ariadne.PathIsRunning` (and mirrors `vnav.PathIsRunning` by default, so plugins that
+yield movement to vnavmesh yield to Ariadne unmodified).
+
+**Integrating a plugin against Ariadne?** Read [docs/consumer-ipc.md](docs/consumer-ipc.md).
 
 `/ariadne` opens the status window: connection state, zone mesh status, vnavmesh build
 progress, manual seed/reload/pathfind actions, and an activity log.

@@ -70,18 +70,32 @@ without waiting on its FileSystemWatcher debounce. Idempotent; Mnemosyne may ign
 duplicates.
 
 ### `updateGameState`
-`{ cacheKey, territoryId, pos: [x,y,z], rotation: <yaw radians>, flying: bool }` → `{ ok }`
+`{ cacheKey, territoryId, pos: [x,y,z], rotation: <yaw radians>, flying: bool, speed?: <y/s> }` → `{ ok }`
 Ariadne-side push, ~10 Hz while a player is loaded into a zone: the player's live
 position for Mnemosyne's viewer (player marker, camera follow, auto zone switch).
 `cacheKey` is the zone's exact vnavmesh cache key as Ariadne computes it in-game;
 `rotation` is character yaw in radians. Server keeps only the latest sample. Send
-best-effort; dropped samples are harmless.
+best-effort; dropped samples are harmless. `speed` is optional (added 2026-08-10):
+if Ariadne can read the character's exact movement speed, send it and the server
+uses it verbatim; otherwise the server derives speed from consecutive positions.
 
 ### `getGameState`
-→ `{ ok, present: bool, cacheKey, territoryId, pos, rotation, flying, ageMs }`
+→ `{ ok, present: bool, cacheKey, territoryId, pos, rotation, flying, ageMs,
+     speed, speeds: { ground, fly } }`
 Latest pushed game state. `present: false` when nothing has been pushed yet or the
 last sample is stale (> 5 s old — treat as "player logged out / Ariadne gone");
-the remaining fields are then absent. Poll-friendly (viewer polls ~10 Hz).
+the remaining position fields are then absent — but `speeds` is still returned,
+since calibration outlives the play session. Poll-friendly (viewer polls ~10 Hz).
+`speed` (added 2026-08-10) is the current movement speed in y/s (pushed exactly, or
+position-derived). `speeds` holds the server's self-calibrated sustained maxima per
+mode, learned by watching the player move (persisted across restarts); fields are
+absent until observed. These feed travel-time estimates.
+
+### `findPath` addendum (2026-08-10)
+Response gains optional `etaSeconds`: path length divided by the calibrated mode
+speed (`speeds.fly` for fly queries, `speeds.ground` otherwise); absent while the
+speed is uncalibrated. An estimate — mounting time, casting, and detours are the
+client's problem.
 
 ## Error/liveness conventions
 

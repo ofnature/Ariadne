@@ -34,6 +34,17 @@ had to rediscover the way. Same job here.
 | `Ariadne.RequestMesh` | `() → Task<string>` | path to a current mesh file for this zone, or `""` |
 | `Ariadne.SeedVnavCache` | `() → Task<bool>` | put the mesh into vnavmesh's cache (reload-nudges if a build already started) |
 | `Ariadne.FindPath` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | proxied to Mnemosyne; runs on the raw cached mesh (no festival customization / reachability pruning) |
+| `Ariadne.Path.MoveTo` | `(List<Vector3> waypoints, bool fly)` action | follow a precomputed path (Ariadne moves the character itself — no vnavmesh needed) |
+| `Ariadne.Path.Stop` | action | |
+| `Ariadne.Path.IsRunning` / `NumWaypoints` | `() → bool` / `() → int` | |
+| `Ariadne.Path.GetTolerance` / `SetTolerance` | `() → float` / `(float)` | waypoint pass tolerance |
+| `Ariadne.Path.GetMovementAllowed` / `SetMovementAllowed` | `() → bool` / `(bool)` | pause/resume without dropping the path |
+| `Ariadne.SimpleMove.PathfindAndMoveTo` | `(Vector3 dest, bool fly) → bool` | FindPath + follow, with stall recovery (re-paths up to N times) |
+| `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | |
+| `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | |
+
+Movement gates mirror vnavmesh's `Path.*` / `SimpleMove.*` shapes so consumers can switch
+by renaming the prefix.
 
 `/ariadne` opens the status window: connection state, zone mesh status, vnavmesh build
 progress, manual seed/reload/pathfind actions, and an activity log.

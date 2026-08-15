@@ -1,6 +1,7 @@
 using Ariadne.Config;
 using Ariadne.Ipc;
 using Ariadne.Mnemosyne;
+using Ariadne.Movement;
 using Ariadne.Seeding;
 using Ariadne.Windows;
 using Ariadne.Zone;
@@ -34,6 +35,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly MeshBroker _broker;
     private readonly ReadyTracker _tracker;
     private readonly GameStatePusher _pusher;
+    private readonly PathFollower _follower;
+    private readonly MoveRequest _move;
     private readonly AriadneIpc _ipc;
     private readonly MainWindow _mainWindow;
 
@@ -67,10 +70,13 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _pusher = new GameStatePusher(SampleGameState,
             s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying));
 
-        _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey);
+        _follower = new PathFollower(_config);
+        _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position, m => Log.Information(m));
+
+        _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move);
 
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher,
+            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher, _follower, _move,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
@@ -95,14 +101,18 @@ public sealed class AriadnePlugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
         _windowSystem.RemoveAllWindows();
         _ipc.Dispose();
+        _move.Dispose();
+        _follower.Dispose(); // unhooks movement/camera
         _zoneWatcher.Dispose();
         _broker.Dispose(); // disposes the pipe client
     }
 
-    private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework _)
+    private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework fwk)
     {
         _tracker.Tick();
         _pusher.Tick();
+        _follower.Update(fwk);
+        _move.Update();
     }
 
     // Runs on the framework thread (safe to touch game state); null while loading or logged out.

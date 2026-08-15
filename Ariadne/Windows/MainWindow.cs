@@ -1,5 +1,6 @@
 using Ariadne.Config;
 using Ariadne.Ipc;
+using Ariadne.Movement;
 using Ariadne.Zone;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -28,10 +29,13 @@ internal sealed class MainWindow : Window
     private readonly ZoneWatcher _zoneWatcher;
     private readonly ReadyTracker _tracker;
     private readonly GameStatePusher _pusher;
+    private readonly PathFollower _follower;
+    private readonly MoveRequest _move;
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
     private bool _pathFly;
+    private float _pathRange;
     private string _lastPathResult = "";
 
     public MainWindow(
@@ -42,6 +46,8 @@ internal sealed class MainWindow : Window
         ZoneWatcher zoneWatcher,
         ReadyTracker tracker,
         GameStatePusher pusher,
+        PathFollower follower,
+        MoveRequest move,
         Func<Vector3?> playerPosition)
         : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
@@ -52,6 +58,8 @@ internal sealed class MainWindow : Window
         _zoneWatcher = zoneWatcher;
         _tracker = tracker;
         _pusher = pusher;
+        _follower = follower;
+        _move = move;
         _playerPosition = playerPosition;
 
         Size = new Vector2(560, 480);
@@ -69,6 +77,7 @@ internal sealed class MainWindow : Window
         DrawZone();
         DrawVnavmesh();
         DrawActions();
+        DrawMovement();
         DrawTimings();
         DrawActivity();
     }
@@ -160,13 +169,38 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Reload vnavmesh"))
             _vnav.Reload();
 
-        // findPath smoke test — expected to fail against the stub, works once real Mnemosyne lands
+        ImGui.Separator();
+    }
+
+    private void DrawMovement()
+    {
+        ImGui.TextUnformatted("Movement");
+        ImGui.SameLine();
+        if (_follower.IsRunning)
+            ImGui.TextColored(Green, $"following — {_follower.Waypoints.Count} waypoints left" + (_move.RetriesUsed > 0 ? $" (re-pathed ×{_move.RetriesUsed})" : ""));
+        else if (_move.TaskInProgress)
+            ImGui.TextColored(Yellow, "pathfinding…");
+        else
+            ImGui.TextColored(Grey, _move.LastResult.Length > 0 ? $"idle — last: {_move.LastResult}" : "idle");
+
         ImGui.SetNextItemWidth(240);
         ImGui.InputFloat3("dest", ref _pathDest);
         ImGui.SameLine();
         ImGui.Checkbox("fly", ref _pathFly);
         ImGui.SameLine();
-        if (ImGui.Button("FindPath from player"))
+        ImGui.SetNextItemWidth(60);
+        ImGui.InputFloat("range", ref _pathRange);
+
+        if (ImGui.Button("Move to dest"))
+            _move.MoveTo(_pathDest, _pathFly, _pathRange);
+        ImGui.SameLine();
+        if (ImGui.Button("Stop"))
+            _move.Stop();
+        ImGui.SameLine();
+        if (ImGui.Button("Set dest = here") && _playerPosition() is { } here)
+            _pathDest = here;
+        ImGui.SameLine();
+        if (ImGui.Button("FindPath only"))
         {
             if (_playerPosition() is { } from)
             {
@@ -178,15 +212,27 @@ internal sealed class MainWindow : Window
                     _lastPathResult = path.Count > 0 ? $"{path.Count} waypoints" : "no path (see activity)";
                 });
             }
-            else
-            {
-                _lastPathResult = "no player position";
-            }
         }
         if (_lastPathResult.Length > 0)
         {
             ImGui.SameLine();
             ImGui.TextColored(Grey, _lastPathResult);
+        }
+
+        var align = _config.AlignCameraToMovement;
+        if (ImGui.Checkbox("Align camera", ref align)) { _config.AlignCameraToMovement = align; _saveConfig(); }
+        ImGui.SameLine();
+        var cancel = _config.CancelMoveOnUserInput;
+        if (ImGui.Checkbox("Cancel on input", ref cancel)) { _config.CancelMoveOnUserInput = cancel; _saveConfig(); }
+        ImGui.SameLine();
+        var stalls = _config.DetectStalls;
+        if (ImGui.Checkbox("Recover from stalls", ref stalls)) { _config.DetectStalls = stalls; _saveConfig(); }
+        if (_config.DetectStalls)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            var retries = _config.StallRetries;
+            if (ImGui.InputInt("retries", ref retries)) { _config.StallRetries = Math.Clamp(retries, 0, 20); _saveConfig(); }
         }
         ImGui.Separator();
     }

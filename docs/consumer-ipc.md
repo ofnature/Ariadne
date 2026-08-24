@@ -81,5 +81,8 @@ be additive.
 
 ## Status
 
-Movement gates and shared-data flags landed 2026-08-09; hooks vendored from vnavmesh,
-in-game verification pending. Pathfinding/mesh gates verified in-game.
+Movement verified in-game 2026-08-23: `SimpleMove.PathfindAndMoveTo` walked the
+character on a Mnemosyne-computed path end-to-end (signatures resolve, hooks drive
+input). Pathfinding/mesh gates verified earlier. Stall recovery is unit-tested but not
+yet exercised against a real wedge; `ReportTraversal` and classified `findPath` results
+await Mnemosyne's server side.

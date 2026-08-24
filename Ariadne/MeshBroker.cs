@@ -37,20 +37,27 @@ internal sealed class MeshBroker : IDisposable
     private readonly CacheSeeder _seeder;
     private readonly VnavIpc _vnav;
     private readonly Func<bool> _autoSeed;
+    private readonly Func<bool> _buildOnMiss;
+    private readonly Func<string, Task<Zone.SceneCaptureDto?>> _captureScene; // marshals to framework thread
     private readonly Action<string> _log;
 
     private readonly object _activityLock = new();
     private readonly Queue<string> _activity = new();
+    private readonly HashSet<string> _buildRequested = []; // one buildZone per key per session
     private const int MaxActivity = 100;
 
     private volatile string _currentKey = "";
 
-    public MeshBroker(MnemosyneClient client, CacheSeeder seeder, VnavIpc vnav, Func<bool> autoSeed, Action<string> log)
+    public MeshBroker(MnemosyneClient client, CacheSeeder seeder, VnavIpc vnav,
+        Func<bool> autoSeed, Func<bool> buildOnMiss, Func<string, Task<Zone.SceneCaptureDto?>> captureScene,
+        Action<string> log)
     {
         _client = client;
         _seeder = seeder;
         _vnav = vnav;
         _autoSeed = autoSeed;
+        _buildOnMiss = buildOnMiss;
+        _captureScene = captureScene;
         _log = log;
     }
 
@@ -171,6 +178,53 @@ internal sealed class MeshBroker : IDisposable
 
         if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);
+        else if (snapshot.Status == ZoneMeshStatus.Missing && _buildOnMiss())
+            await RequestBuildAsync(cacheKey).ConfigureAwait(false);
+    }
+
+    // The vnavmesh-replacement path: nobody has a mesh, so capture the live scene (only
+    // the game process sees active festival layers / SG states / live instances) and let
+    // Mnemosyne build the exact variant out of process. vnavmesh may be building in-game
+    // at the same time — whoever finishes first wins, the other becomes the cache.
+    private async Task RequestBuildAsync(string cacheKey)
+    {
+        lock (_activityLock)
+        {
+            if (!_buildRequested.Add(cacheKey))
+                return; // already asked this session — don't spam multi-second builds
+        }
+
+        var capture = await _captureScene(cacheKey).ConfigureAwait(false);
+        if (capture == null || capture.CacheKey != cacheKey)
+        {
+            Activity("build capture failed (layout gone?) — will retry on next visit");
+            lock (_activityLock)
+                _buildRequested.Remove(cacheKey);
+            return;
+        }
+
+        Activity($"requesting out-of-process build: {capture.InstanceCount} instances, {capture.Terrains.Length} terrains, {capture.MeshPaths.Length} collision meshes");
+        var resp = await _client.BuildZoneAsync(capture).ConfigureAwait(false);
+        if (resp is not { Ok: true })
+        {
+            Activity($"buildZone declined: {resp?.Error ?? "Mnemosyne unavailable"}");
+            return; // stays in _buildRequested — a declining server won't change its mind this session
+        }
+
+        // build runs server-side (tens of seconds); poll until it lands, then re-query → seed
+        for (var waited = 0; waited < 300_000 && _currentKey == cacheKey; waited += 3000)
+        {
+            await Task.Delay(3000).ConfigureAwait(false);
+            var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
+            if (status is { Ok: true, Status: "cached" })
+            {
+                Activity($"out-of-process build complete (~{(waited + 3000) / 1000}s)");
+                await QueryAsync(cacheKey).ConfigureAwait(false); // re-enters as MnemosyneCached → auto-seed
+                return;
+            }
+        }
+        if (_currentKey == cacheKey)
+            Activity("out-of-process build did not finish within 5min — giving up for this visit");
     }
 
     private async Task<Snapshot> BuildSnapshotAsync(string cacheKey)

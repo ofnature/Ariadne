@@ -12,6 +12,11 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// a current mesh the local cache lacks.</summary>
     public bool AutoSeed { get; set; } = true;
 
+    /// <summary>When nobody has a mesh for the zone, capture the live scene and ask
+    /// Mnemosyne to build it out of process (the vnavmesh-replacement path: no in-game
+    /// build cost, exact live variant).</summary>
+    public bool BuildOnMiss { get; set; } = true;
+
     // ---- movement ----
 
     /// <summary>Turn the camera to face the direction of travel while following a path.</summary>

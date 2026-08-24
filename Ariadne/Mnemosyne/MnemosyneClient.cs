@@ -67,6 +67,11 @@ internal sealed class MnemosyneClient : IDisposable
     public Task<Response?> NotifyMeshBuiltAsync(string cacheKey, string path, CancellationToken cancel = default)
         => SendAsync<Response>(new Request { Op = "notifyMeshBuilt", CacheKey = cacheKey, Path = path }, cancel);
 
+    /// <summary>Ship a live scene capture for an out-of-process build of the exact zone
+    /// variant. Server must ack immediately (build runs async; poll zoneStatus).</summary>
+    public Task<Response?> BuildZoneAsync(Zone.SceneCaptureDto scene, CancellationToken cancel = default)
+        => SendAsync<Response>(new Request { Op = "buildZone", CacheKey = scene.CacheKey, Scene = scene }, cancel);
+
     /// <summary>Feedback into the mesh-learning channel: a traversal that succeeded where
     /// the mesh said no ("direct"), or a planned leg that failed. Fire-and-forget.</summary>
     public Task<Response?> ReportTraversalAsync(string cacheKey, float[] from, float[] to, string mode, bool success, CancellationToken cancel = default)

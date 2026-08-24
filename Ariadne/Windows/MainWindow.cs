@@ -159,6 +159,13 @@ internal sealed class MainWindow : Window
             _config.AutoSeed = autoSeed;
             _saveConfig();
         }
+        ImGui.SameLine();
+        var buildOnMiss = _config.BuildOnMiss;
+        if (ImGui.Checkbox("Build missing meshes (capture → Mnemosyne)", ref buildOnMiss))
+        {
+            _config.BuildOnMiss = buildOnMiss;
+            _saveConfig();
+        }
 
         if (ImGui.Button("Refresh"))
             _ = _broker.RefreshAsync();

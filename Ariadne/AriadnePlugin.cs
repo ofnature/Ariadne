@@ -9,6 +9,7 @@ using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using System;
 using System.IO;
 using System.Reflection;
 using static Ariadne.Service;
@@ -54,7 +55,13 @@ public sealed class AriadnePlugin : IDalamudPlugin
         var client = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m));
         var vnav = new VnavIpc(PluginInterface, m => Log.Information(m));
         _broker = new MeshBroker(client, new CacheSeeder(vnavCacheDir), vnav,
-            () => _config.AutoSeed, m => Log.Information(m));
+            () => _config.AutoSeed, () => _config.BuildOnMiss,
+            cacheKey => Framework.RunOnFrameworkThread(() =>
+            {
+                try { return SceneCapture.CaptureActive(cacheKey); }
+                catch (Exception ex) { Log.Warning($"Scene capture failed: {ex.Message}"); return null; }
+            }),
+            m => Log.Information(m));
 
         _tracker = new ReadyTracker(
             () => vnav.IsAvailable, () => vnav.IsReady, () => vnav.BuildProgress,

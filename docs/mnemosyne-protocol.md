@@ -94,6 +94,33 @@ get a followable (if mode-naive) path. `enter` is the transition the follower pe
 before walking/flying that leg's waypoints — mount/land at the leg boundary, land at the
 destination's floor, dismount before interiors.
 
+### `buildZone`
+`{ cacheKey, scene: { …SceneCaptureDto… } }` → `{ ok }` ack **immediately** (the build
+runs async server-side — client polls `zoneStatus` until `cached`; Ariadne polls every
+3 s for up to 5 min). Spec'd 2026-08-23 (Ariadne PLAN "Meshing"; Mnemosyne's deferred
+"active acquisition") — server implementation pending; a server without the op answers
+`ok:false` unknown-op and the client degrades.
+
+The scene is Ariadne's live capture of the exact zone variant — the part only the game
+process can see: active festival layers, zone shared-group states, live layout instances.
+Shape (camelCase, mirrors vnavmesh's `SceneDefinition`; authoritative C# DTO:
+`Ariadne/Zone/SceneCapture.cs`, wire-shape locked by `SceneCaptureDtoTests`):
+
+```
+{ cacheKey, territoryId, cfcId, festivalLayers: [uint], zoneSGs: [uint],
+  terrains: [string], analyticShapes: [{ crc, transform, bbMin, bbMax }],
+  meshPaths: [{ crc, path }], bgParts: [{ key, transform, crc, matId, matMask, analytic }],
+  colliders: [{ key, transform, crc, matId, matMask, type }],
+  exitRanges: [{ key, transform }] }
+transform = { t: [x,y,z], r: [x,y,z,w], s: [x,y,z] }
+```
+
+Collision file *contents* are not shipped — `meshPaths`/`terrains` are sqpack paths the
+server reads itself via Lumina (its builder already does). Note for the server's line
+reader: a dense zone capture is a **multi-megabyte single line**; don't cap line length.
+Build result goes into the built store under `cacheKey` exactly as `TryBuild`'s output
+does; from there the normal `zoneStatus`/`getMesh`/seed machinery takes over.
+
 ### `reportTraversal`
 `{ cacheKey, from: [x,y,z], to: [x,y,z], mode: "walk"|"fly"|"direct", success: bool, note? }`
 → `{ ok }` (spec'd 2026-08-23; server implementation pending)

@@ -39,6 +39,9 @@ internal sealed class Request
     public string? Mode { get; set; }
     public bool? Success { get; set; }
     public string? Note { get; set; }
+
+    // buildZone field — the live scene capture
+    public Zone.SceneCaptureDto? Scene { get; set; }
 }
 
 internal class Response

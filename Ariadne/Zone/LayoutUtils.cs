@@ -107,6 +107,7 @@ internal static unsafe class LayoutUtils
     }
 
     public static string ReadString(byte* data) => data != null ? MemoryHelper.ReadStringNullTerminated((nint)data) : "";
+    public static string ReadString(RefCountedString* data) => data != null ? data->DataString : "";
 
     public static V* FindPtr<K, V>(ref this StdMap<K, Pointer<V>> map, K key) where K : unmanaged, IComparable where V : unmanaged
     {

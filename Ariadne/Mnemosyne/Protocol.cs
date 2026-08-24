@@ -34,6 +34,11 @@ internal sealed class Request
     public float[]? Pos { get; set; }
     public float? Rotation { get; set; }
     public bool? Flying { get; set; }
+
+    // reportTraversal fields
+    public string? Mode { get; set; }
+    public bool? Success { get; set; }
+    public string? Note { get; set; }
 }
 
 internal class Response
@@ -69,4 +74,9 @@ internal sealed class GetMeshResponse : Response
 internal sealed class FindPathResponse : Response
 {
     public float[][]? Waypoints { get; set; }
+    public bool Partial { get; set; }
+
+    // classified answers (spec 2026-08-23); null from legacy servers
+    public string? Result { get; set; } // "ok" | "targetOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable"
+    public float[]? Nearest { get; set; }
 }

@@ -33,6 +33,7 @@ internal sealed class PathFollower : IDisposable
     private readonly PathIsRunningSignal _signal;
     private readonly List<Vector3> _waypoints = [];
     private readonly StallDetector _stall;
+    private readonly ProgressBudget _progress;
 
     private Vector3? _posPreviousFrame;
     private DateTime _nextJump;
@@ -42,6 +43,7 @@ internal sealed class PathFollower : IDisposable
         _config = config;
         _signal = signal;
         _stall = new StallDetector(config.StallMinProgress, config.StallWindowMs);
+        _progress = new ProgressBudget(config.ProgressMinGain, config.ProgressWindowMs);
     }
 
     public void Dispose()
@@ -58,6 +60,7 @@ internal sealed class PathFollower : IDisposable
         IgnoreDeltaY = !fly;
         DestinationTolerance = destinationTolerance;
         _stall.Reset();
+        _progress.Reset();
         _signal.Set(_waypoints.Count > 0);
     }
 
@@ -65,6 +68,7 @@ internal sealed class PathFollower : IDisposable
     {
         _waypoints.Clear();
         _stall.Reset();
+        _progress.Reset();
         _signal.Set(false);
     }
 
@@ -92,12 +96,19 @@ internal sealed class PathFollower : IDisposable
             return;
         }
 
-        if (_config.DetectStalls && _stall.Update(player.Position, fwk.UpdateDelta.Milliseconds))
+        if (_config.DetectStalls)
         {
             var destination = _waypoints[^1];
-            OnStalled?.Invoke(destination, !IgnoreDeltaY, DestinationTolerance);
-            if (_waypoints.Count == 0)
-                return; // handler stopped us
+            var deltaMs = fwk.UpdateDelta.Milliseconds;
+            // hard stall (frozen) OR soft stall (wobbling/circling without closing on the goal)
+            var stalled = _stall.Update(player.Position, deltaMs);
+            stalled |= _progress.Update((destination - player.Position).Length(), deltaMs);
+            if (stalled)
+            {
+                OnStalled?.Invoke(destination, !IgnoreDeltaY, DestinationTolerance);
+                if (_waypoints.Count == 0)
+                    return; // handler stopped us
+            }
         }
 
         _posPreviousFrame = player.Position;

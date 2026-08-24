@@ -25,6 +25,9 @@ internal sealed class AriadneIpc : IDisposable
         RegisterFunc("RequestMesh", broker.RequestMeshAsync);
         RegisterFunc("SeedVnavCache", broker.SeedVnavCacheAsync);
         RegisterFunc("FindPath", (Vector3 from, Vector3 to, bool fly) => broker.FindPathAsync(from, to, fly));
+        // feedback channel (Odysseus §2): report a traversal that succeeded where the mesh
+        // said no ("direct"), or a planned leg that failed — becomes override evidence
+        RegisterFunc("ReportTraversal", (Vector3 from, Vector3 to, string mode, bool success) => broker.ReportTraversalAsync(from, to, mode, success));
 
         // movement — same shapes as vnavmesh's Path.* / SimpleMove.* so a compat alias layer is trivial later
         RegisterAction("Path.MoveTo", (List<Vector3> waypoints, bool fly) => follower.Move(waypoints, fly));
@@ -63,6 +66,13 @@ internal sealed class AriadneIpc : IDisposable
     private void RegisterFunc<TRet, T1, T2, T3>(string name, Func<T1, T2, T3, TRet> func)
     {
         var p = _pluginInterface.GetIpcProvider<T1, T2, T3, TRet>("Ariadne." + name);
+        p.RegisterFunc(func);
+        _disposeActions.Add(p.UnregisterFunc);
+    }
+
+    private void RegisterFunc<TRet, T1, T2, T3, T4>(string name, Func<T1, T2, T3, T4, TRet> func)
+    {
+        var p = _pluginInterface.GetIpcProvider<T1, T2, T3, T4, TRet>("Ariadne." + name);
         p.RegisterFunc(func);
         _disposeActions.Add(p.UnregisterFunc);
     }

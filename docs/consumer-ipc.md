@@ -48,9 +48,13 @@ Ariadne only steers while the player isn't pressing anything (vnavmesh semantics
 | `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | stop within `range` |
 | `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending (movement not started yet) |
 
-Stall recovery is built in: on no-progress Ariadne re-paths from the current position up
-to N times (config), then stops. A consumer sees this only as `IsRunning` staying true a
-little longer; a give-up looks like a normal stop.
+Stall recovery is built in, two detectors: hard stall (displacement below threshold —
+frozen against a wall) and soft stall (not closing on the destination — the ±4y
+tree-wobble that defeats displacement checks). On either, Ariadne re-paths from the
+current position; attempts are budgeted by ground gained, not by count — a recovery that
+closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. A consumer
+sees this only as `IsRunning` staying true a little longer; a give-up looks like a
+normal stop.
 
 ## Pathfinding / mesh gates
 
@@ -62,6 +66,7 @@ little longer; a give-up looks like a normal stop.
 | `Ariadne.FindPath` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | empty = no path/unavailable, never throws |
 | `Ariadne.RequestMesh` | `() → Task<string>` | path to a current `.navmesh` file, or `""` |
 | `Ariadne.SeedVnavCache` | `() → Task<bool>` | hand this zone's mesh to vnavmesh's cache |
+| `Ariadne.ReportTraversal` | `(Vector3 from, Vector3 to, string mode, bool success) → Task<bool>` | feed the mesh-learning channel: `mode` `"direct"` + `success` = "I drove through where the mesh said no" (off-mesh-link evidence — Yedlihmad doorways); `success:false` = a planned route failed there. Best-effort; false = not recorded |
 
 **Readiness**: there is no `Nav.IsReady` twin. "Nav can answer for this zone" =
 `IsConnected && ZoneStatus is 2 or 3`. Because Mnemosyne holds meshes out of process,

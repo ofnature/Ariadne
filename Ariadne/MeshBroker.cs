@@ -120,8 +120,21 @@ internal sealed class MeshBroker : IDisposable
             return [];
         }
 
-        Activity($"findPath: {waypoints.Length} waypoints ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
+        var qualifiers = (resp.Partial ? " partial" : "") + (resp.Result is { } r and not "ok" ? $" [{r}]" : "");
+        Activity($"findPath: {waypoints.Length} waypoints{qualifiers} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
         return [.. waypoints.Where(w => w.Length >= 3).Select(w => new Vector3(w[0], w[1], w[2]))];
+    }
+
+    /// <summary>Forward execution feedback (traversal succeeded off-mesh / planned leg
+    /// failed) into Mnemosyne's learning channel. Best-effort; no-op when zone not ready.</summary>
+    public async Task<bool> ReportTraversalAsync(Vector3 from, Vector3 to, string mode, bool success)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+            return false;
+        var resp = await _client.ReportTraversalAsync(key, [from.X, from.Y, from.Z], [to.X, to.Y, to.Z], mode, success).ConfigureAwait(false);
+        Activity($"reportTraversal {mode} {(success ? "success" : "failure")}: {(resp is { Ok: true } ? "recorded" : resp?.Error ?? "unavailable")}");
+        return resp is { Ok: true };
     }
 
     private async Task QueryAsync(string cacheKey)

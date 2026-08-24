@@ -63,6 +63,47 @@ returned waypoints and re-query from the last one (receding horizon). **Known
 divergence**: runs on the raw cached mesh — no per-festival `CustomizeMesh`, no
 flood-fill pruning.
 
+**Classified answers** (spec'd 2026-08-23 from the Odysseus field requirements — Ariadne
+PLAN.md §3 "Honest answers instead of one no"; server implementation pending). The
+response gains an optional `result` field so consumers can act once, correctly, instead
+of disambiguating "no" by experiment:
+
+- `"ok"` — waypoints reach `to` (possibly `partial` per above)
+- `"targetOffMesh"` — `to` isn't on the mesh/volume; `nearest: [x,y,z]` carries the
+  closest reachable point (consumer decides: fight from here / walk the last yalm)
+- `"noRouteOnMesh"` — both ends on-mesh, no route: the mesh is lying (hole, bad voxels) —
+  the tonight-signal for "rebuild / add an override"
+- `"meshNotReady"` — zone still loading/building server-side; retryable
+- `"unreachable"` — genuinely disconnected after override application
+
+Servers that omit `result` are treated as legacy (`ok` iff waypoints non-empty). Clients
+must tolerate unknown values (treat as `"unreachable"`).
+
+**Multi-modal legs** (spec'd 2026-08-23 — Mnemosyne PLAN.md milestone 11; additive,
+implementation pending). Request gains `constraints?: ["noFly","noMount","noTeleport",
+"noDismount"]` (e.g. quest vehicles = `["noFly","noMount","noDismount","noTeleport"]`);
+when the server plans multi-modally it adds `legs`:
+
+```
+legs: [ { mode: "walk"|"fly", enter?: "mount"|"jumpOff"|"land"|"dismount"|"teleport",
+          enterArg?: <aetheryteId>, first: <index into waypoints>, count: <n> } ]
+```
+
+Legs index into the flat `waypoints` array so legacy consumers that ignore `legs` still
+get a followable (if mode-naive) path. `enter` is the transition the follower performs
+before walking/flying that leg's waypoints — mount/land at the leg boundary, land at the
+destination's floor, dismount before interiors.
+
+### `reportTraversal`
+`{ cacheKey, from: [x,y,z], to: [x,y,z], mode: "walk"|"fly"|"direct", success: bool, note? }`
+→ `{ ok }` (spec'd 2026-08-23; server implementation pending)
+Feedback channel from execution back into the mesh (Ariadne PLAN.md §2): the follower (or
+a consumer like Odysseus) reports that a traversal succeeded where the mesh said no-path
+(`mode: "direct"`, `success: true` = off-mesh-link candidate for the OverrideStore) or
+that a planned leg failed (`success: false` = block/cost-paint candidate). Server
+accumulates evidence; nothing is auto-applied without the viewer's edit workflow unless
+Mnemosyne decides otherwise. Fire-and-forget, idempotent, best-effort.
+
 ### `notifyMeshBuilt`
 `{ cacheKey, path }` → `{ ok }`
 Ariadne-side push when it observes vnavmesh finish a fresh build, so Mnemosyne ingests

@@ -22,6 +22,7 @@ internal sealed class MoveRequest : IDisposable
     private readonly Func<Vector3?> _playerPosition;
     private readonly Action<string> _log;
 
+    private readonly FutilityCounter _futility;
     private Task<List<Vector3>>? _pending;
     private Vector3 _pendingDest;
     private bool _pendingFly;
@@ -34,6 +35,7 @@ internal sealed class MoveRequest : IDisposable
         _config = config;
         _playerPosition = playerPosition;
         _log = log;
+        _futility = new FutilityCounter(config.ProgressMinGain, config.StallRetries);
         _follower.OnStalled += OnStalled;
     }
 
@@ -65,6 +67,7 @@ internal sealed class MoveRequest : IDisposable
     public bool MoveTo(Vector3 dest, bool fly, float range = 0)
     {
         RetriesUsed = 0;
+        _futility.Reset();
         return Request(dest, fly, range);
     }
 
@@ -99,16 +102,20 @@ internal sealed class MoveRequest : IDisposable
 
     private void OnStalled(Vector3 destination, bool fly, float range)
     {
-        if (RetriesUsed >= _config.StallRetries)
+        // Attempts are budgeted by ground gained, not by count: a re-path that closed
+        // ProgressMinGain since the last one clears the futility count (Odysseus's rule —
+        // progress buys the clock back). Only consecutive futile recoveries give up.
+        var remaining = _playerPosition() is { } pos ? (destination - pos).Length() : float.MaxValue;
+        if (_futility.RecordAttempt(remaining))
         {
-            _log($"[Move] stalled {RetriesUsed + 1}× — giving up");
-            LastResult = "stuck";
+            _log($"[Move] {_futility.FutileAttempts} recoveries without gaining ground — giving up ({remaining:0}y short)");
+            LastResult = $"stuck ({remaining:0}y short)";
             _follower.Stop();
             return;
         }
 
         RetriesUsed++;
-        _log($"[Move] stalled — re-pathing (attempt {RetriesUsed}/{_config.StallRetries})");
+        _log($"[Move] stalled at {remaining:0}y out — re-pathing (futile {_futility.FutileAttempts}/{_config.StallRetries})");
         _follower.Stop();
         Request(destination, fly, range);
     }

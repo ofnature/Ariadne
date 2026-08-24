@@ -23,11 +23,17 @@ public sealed class AriadneConfig : IPluginConfiguration
 
     /// <summary>Detect no-progress while following and re-path (recovery vnavmesh lacks).</summary>
     public bool DetectStalls { get; set; } = true;
-    /// <summary>Stalled = moved less than this many yalms…</summary>
+    /// <summary>Hard stall: displaced less than this many yalms…</summary>
     public float StallMinProgress { get; set; } = 0.5f;
     /// <summary>…over this many milliseconds.</summary>
     public int StallWindowMs { get; set; } = 1500;
-    /// <summary>Re-path attempts before giving up on a stalled move.</summary>
+    /// <summary>Soft stall (wobbling without gaining): closed less than this many yalms
+    /// toward the destination…</summary>
+    public float ProgressMinGain { get; set; } = 10f;
+    /// <summary>…over this many milliseconds. Gaining ground buys the clock back.</summary>
+    public int ProgressWindowMs { get; set; } = 15000;
+    /// <summary>Futile recovery attempts (re-paths that gained less than ProgressMinGain)
+    /// before giving up. Recoveries that gain ground don't count against this.</summary>
     public int StallRetries { get; set; } = 3;
 
     /// <summary>Also publish the shared-data flag under vnavmesh's name

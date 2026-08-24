@@ -67,6 +67,11 @@ internal sealed class MnemosyneClient : IDisposable
     public Task<Response?> NotifyMeshBuiltAsync(string cacheKey, string path, CancellationToken cancel = default)
         => SendAsync<Response>(new Request { Op = "notifyMeshBuilt", CacheKey = cacheKey, Path = path }, cancel);
 
+    /// <summary>Feedback into the mesh-learning channel: a traversal that succeeded where
+    /// the mesh said no ("direct"), or a planned leg that failed. Fire-and-forget.</summary>
+    public Task<Response?> ReportTraversalAsync(string cacheKey, float[] from, float[] to, string mode, bool success, CancellationToken cancel = default)
+        => SendAsync<Response>(new Request { Op = "reportTraversal", CacheKey = cacheKey, From = from, To = to, Mode = mode, Success = success }, cancel);
+
     /// <summary>Best-effort ~10 Hz player-position push for Mnemosyne's viewer; dropped
     /// samples are harmless (server keeps only the latest).</summary>
     public Task<Response?> UpdateGameStateAsync(string cacheKey, uint territoryId, float[] pos, float rotation, bool flying, CancellationToken cancel = default)

@@ -13,6 +13,30 @@ breaking changes bump `protocol` in the hello response.
   (single-machine deployment). The envelope reserves `data` for future inline bytes
   (base64) so remote support is additive.
 
+## Service lifecycle (verified 2026-08-24)
+
+The service is a plain console app, but nobody should have to remember to start it — so
+Ariadne starts it. The contract that makes that safe:
+
+- **Single instance, machine-wide.** The service holds `Global\MnemosyneService`; a second
+  launch prints `another Mnemosyne service is already running` and exits 0 without touching
+  the pipe. *Verified: four simultaneous launches → exactly one survivor.*
+- **Discovery.** On every run the service stamps its own exe path into
+  `%APPDATA%\Mnemosyne\service.path`. Ariadne reads that file when its configured path is
+  empty, so rebuilding or moving the service needs no plugin config change. A machine that
+  has never run the service has no marker — Ariadne logs a one-line hint instead of guessing.
+- **Autostart trigger.** Ariadne probes `File.Exists(\\.\pipe\mnemosyne)` before connecting
+  (named pipes are real entries in the filesystem namespace, so this is exact and free — it
+  beats eating the 2 s connect timeout to discover the same thing). Missing pipe → launch,
+  rate-limited to one attempt per 30 s, serialised across game clients by
+  `Global\MnemosyneServiceLaunch`. The connect still fails that cycle; the existing backoff
+  retry picks it up. Config: `AutoStartMnemosyne` (default on), `MnemosyneServicePath`
+  (empty = use the marker).
+- **Observability when hidden.** An autostarted service has no console window, so it tees
+  everything it prints to `%APPDATA%\Mnemosyne\service.log` (truncated per run).
+- **Restart is transparent.** Killing the service leaves clients with zombie pipe handles;
+  they drop on the next request timeout and reconnect — no plugin reload needed.
+
 ## Envelope
 
 Request: `{ "id": <int>, "op": "<name>", ...op fields }`
@@ -35,8 +59,9 @@ Everything the cache index holds. `cacheKey` is the vnavmesh filename stem
 `customization` the header's per-zone customization counter, `mtime` ISO-8601 UTC.
 
 ### `zoneStatus`
-`{ cacheKey }` → `{ ok, status: "cached"|"missing"|"stale", version, customization }`
+`{ cacheKey }` → `{ ok, status: "cached"|"missing"|"stale"|"building", version, customization }`
 `stale` = present but header version ≠ current `meshVersion` (or unreadable).
+`building` = a server-side build for this key is running; `progress` is 0..1 (see below).
 
 ### `getMesh`
 `{ cacheKey }` → `{ ok, path: "<absolute path to .navmesh>", version, customization, size }`
@@ -46,12 +71,33 @@ the same key; Ariadne copies immediately. (Future remote: same op, `data` field 
 
 **Builder fallback** (server-side, since 2026-08-08): when a zone is absent from
 vnavmesh's cache, Mnemosyne may build it from game files itself and serve the result from
-its own store (`%APPDATA%\Mnemosyne\built`). Consequences for clients: `getMesh` and
-`findPath` can block for a cold build (~10-30 s — treat a timeout as retryable, the build
-continues server-side); `zoneStatus` reports `cached` when either vnavmesh's file or a
-current built file exists. vnavmesh's cache always wins when both exist. Built meshes are
-baseline (no festivals, shared groups in default state) and lack vnavmesh's per-zone
-customizations.
+its own store (`%APPDATA%\Mnemosyne\built`). `zoneStatus` reports `cached` when either
+vnavmesh's file or a current built file exists. vnavmesh's cache always wins when both
+exist. Built meshes are baseline (no festivals, shared groups in default state) and lack
+vnavmesh's per-zone customizations.
+
+**Builds never block a request** (changed 2026-08-24, phase 2 — previously `getMesh` and
+`findPath` blocked for the whole cold build). A build now runs on its own thread and every
+op answers immediately:
+
+- `zoneStatus` → `status: "building"`, `progress: 0..1`
+- `getMesh` → `ok: false`, `result: "meshNotReady"`
+- `findPath` / `Query.Mesh.*` → `ok: false`, `result: "meshNotReady"`
+
+The old behaviour was actively harmful with a fleet: one cold build held the build lock for
+tens of seconds, so all four clients' next request blew the 10 s request timeout, dropped
+their pipes and reconnected. `meshNotReady` is retryable — poll `zoneStatus` and re-issue
+when it reports `cached`.
+
+**Overrides are baked into served files** (answered 2026-08-24 by the Mnemosyne session;
+Ariadne PLAN asked whether to bake or keep in-memory — **bake**). The `.navmesh` handed
+back by `getMesh` has the zone's OverrideStore edits already applied (blocks, prunes,
+off-mesh links, later cost paints), so a seeded vnavmesh cache carries the curated mesh
+too — custom meshes work during the transition, not only after the replacement. The
+viewer keeps applying overrides in memory for live editing. Consequence for clients: a
+served file can differ from vnavmesh's own build of the same cacheKey by design; the
+header's `customization` field is unchanged (it tracks vnavmesh's per-zone version, not
+ours).
 
 ### `findPath`
 `{ cacheKey, from: [x,y,z], to: [x,y,z], fly: bool }`
@@ -74,10 +120,31 @@ of disambiguating "no" by experiment:
 - `"noRouteOnMesh"` — both ends on-mesh, no route: the mesh is lying (hole, bad voxels) —
   the tonight-signal for "rebuild / add an override"
 - `"meshNotReady"` — zone still loading/building server-side; retryable
-- `"unreachable"` — genuinely disconnected after override application
+- `"unreachable"` — goal is on the mesh but in a flood-fill-pruned region (vnavmesh's
+  `FLAG_UNREACHABLE`): genuinely disconnected, not a mesh defect. Do not report it as one.
+
+Two further values, added with the implementation (2026-08-24):
+
+- `"startOffMesh"` — `from` isn't on the mesh; `nearest` is the closest point to *`from`*.
+  Distinct from `targetOffMesh` because the consumer's move is different: get the character
+  onto the mesh first, rather than accepting a shorter goal.
+- `"avoidIgnored"` — the avoid circle sealed the only corridor, so the returned route
+  ignores it (see `avoidCenter` below).
+
+`nearest: [x,y,z]` accompanies `targetOffMesh` and `startOffMesh`, and is absent otherwise.
 
 Servers that omit `result` are treated as legacy (`ok` iff waypoints non-empty). Clients
 must tolerate unknown values (treat as `"unreachable"`).
+
+**Status: implemented server-side 2026-08-24.** `ok:false` responses now always carry a
+`result`; `ok:true` carries one only when it is not a plain success (`avoidIgnored`).
+
+**Reaching consumers.** The vnavmesh-shaped gates return a bare `List<Vector3>`, so they
+structurally cannot carry a classification — "no path" and "your goal is 2 y off the mesh,
+stand here instead" look identical through them. Ariadne therefore adds
+`Ariadne.Nav.PathfindDetailed(from, to, fly)` → `(result, waypoints, nearest, partial)`
+alongside the compat gates. A legacy server that omits `result` is reported as `"ok"` when
+waypoints came back and `"unreachable"` when they did not, so the field is never empty.
 
 **Multi-modal legs** (spec'd 2026-08-23 — Mnemosyne PLAN.md milestone 11; additive,
 implementation pending). Request gains `constraints?: ["noFly","noMount","noTeleport",
@@ -94,12 +161,87 @@ get a followable (if mode-naive) path. `enter` is the transition the follower pe
 before walking/flying that leg's waypoints — mount/land at the leg boundary, land at the
 destination's floor, dismount before interiors.
 
+### `nearestPoint` / `isPointOnMesh` / `pointOnFloor`  (spec'd 2026-08-24, Mnemosyne session)
+
+The `Query.Mesh.*` gates consumers call (Theseus, Olympus, SealBreaker), served from the
+loaded zone. Semantics match vnavmesh's `NavmeshQuery` helpers exactly.
+
+```
+nearestPoint    { cacheKey, point: [x,y,z], halfExtentXZ=5, halfExtentY=5, reachableOnly=false }
+                → { ok, found: bool, point?: [x,y,z] }
+isPointOnMesh   { cacheKey, point, halfExtentY=5, allowUnreachable=true }
+                → { ok, onMesh: bool }
+pointOnFloor    { cacheKey, point, halfExtentXZ=5, allowUnreachable=true }
+                → { ok, found: bool, point?: [x,y,z] }
+```
+
+- `nearestPoint` = vnavmesh `Query.Mesh.NearestPoint`; with `reachableOnly:true` it is
+  `Query.Mesh.NearestPointReachable` (filter excludes `FLAG_UNREACHABLE` 0x10).
+- `pointOnFloor` = largest-Y point still below `point.Y` within the XZ tolerance
+  (vnavmesh searches ±2048 y vertically; same here).
+- `Query.Mesh.FlagToPoint` stays **client-side**: Ariadne reads the map flag from game
+  state, then calls `pointOnFloor`.
+
+### `buildBitmap`  (spec'd 2026-08-24)
+
+`Nav.BuildBitmap{,Bounded,Multi,MultiBounded}` — Olympus uses the bounded forms.
+
+```
+buildBitmap { cacheKey, startingPoints: [[x,y,z], ...], filename, pixelSize,
+              minBounds?: [x,y,z], maxBounds?: [x,y,z] }
+            → { ok, path: "<absolute path written>" }
+```
+
+Flood-fills walkable polys from the starting points and writes vnavmesh's bitmap format
+(vendored `NavmeshBitmap`). Bounds omitted = whole mesh. The server writes the file and
+returns its absolute path; the client relays vnavmesh's `bool` from `ok`.
+
+### `findPath` additions  (spec'd 2026-08-24)
+
+Request gains the vnavmesh pathfind variants:
+
+- `tolerance?: <yalms>` — `Nav.PathfindWithTolerance` / `SimpleMove.PathfindAndMoveCloseTo`.
+  Implementation note (documented divergence): vnavmesh stops A* early with a goal-radius
+  heuristic; Mnemosyne paths to the goal and trims trailing waypoints inside the radius,
+  and when the goal itself is unreachable it retries against the nearest reachable point
+  within `tolerance`. Same practical result for a follower, and it also answers the
+  "goal is 1 y off-mesh" case that made consumers retry blindly.
+- `avoidCenter?: [x,y,z]`, `avoidRadius?: <yalms>` — `Nav.PathfindAvoid`. Applies to
+  **both ground and fly** legs. Two documented divergences from vnavmesh, both deliberate:
+  - vnavmesh only engages avoid when the *straight* `from`→`to` segment enters the circle.
+    A hazard sitting on the actual (curved) route is therefore ignored — measured on
+    `sea_s1_fld_s1f6`, an avoid circle centred on a waypoint of the returned route changed
+    nothing: 24 waypoints in, 24 out, still passing through the centre. Mnemosyne filters
+    whenever a positive radius is asked for. Same test after the change: closest approach
+    0.0 m → 164.4 m, 13 waypoints.
+  - The radius is clamped to `min(dist(from, centre), dist(to, centre)) - 0.5`, so avoid can
+    never exclude the start or the goal. Standing inside the hazard means "get no closer",
+    not "no path exists".
+  - If the circle seals the only corridor, the response carries the unconstrained route with
+    `result: "avoidIgnored"` rather than failing. Losing the route *and* the reason is the
+    worst answer; the consumer can decide whether to walk it or wait.
+  - Flying with avoid bypasses the coarse octree (it has no notion of the circle) and uses
+    the voxel search, which is what vnavmesh does for volume paths.
+
+`findPath` response gains `result?: string` — why the answer looks the way it does, when
+`ok: true` alone would mislead. Absent means plain success. First member: `"avoidIgnored"`.
+Phase 2 grows this into the full classification (off-mesh goal, unreachable component,
+needs-teleport, budget-exhausted), so treat an unknown value as informational, never fatal.
+
+### `zoneStatus` additions  (spec'd 2026-08-24)
+
+Response gains `progress: <0..1>` and `building: bool` so `Nav.BuildProgress` reports a
+real number while `buildZone`/`TryBuild` runs (`-1` when nothing is building, matching
+vnavmesh's idle value). `pathfindInProgress: bool` and `pathfindNumQueued: int` are also
+returned, serving `Nav.PathfindInProgress` / `Nav.PathfindNumQueued`.
+
 ### `buildZone`
 `{ cacheKey, scene: { …SceneCaptureDto… } }` → `{ ok }` ack **immediately** (the build
 runs async server-side — client polls `zoneStatus` until `cached`; Ariadne polls every
 3 s for up to 5 min). Spec'd 2026-08-23 (Ariadne PLAN "Meshing"; Mnemosyne's deferred
-"active acquisition") — server implementation pending; a server without the op answers
-`ok:false` unknown-op and the client degrades.
+"active acquisition"). **Implemented server-side 2026-08-24**; a server without the op still
+answers `ok:false` unknown-op and the client degrades. The ack carries
+`result: "meshNotReady"` — the build has started, poll `zoneStatus`.
 
 The scene is Ariadne's live capture of the exact zone variant — the part only the game
 process can see: active festival layers, zone shared-group states, live layout instances.
@@ -112,8 +254,15 @@ Shape (camelCase, mirrors vnavmesh's `SceneDefinition`; authoritative C# DTO:
   meshPaths: [{ crc, path }], bgParts: [{ key, transform, crc, matId, matMask, analytic }],
   colliders: [{ key, transform, crc, matId, matMask, type }],
   exitRanges: [{ key, transform }] }
-transform = { t: [x,y,z], r: [x,y,z,w], s: [x,y,z] }
+transform = { t: [x,y,z], r: [x,y,z,w], s: [x,y,z], type: int }
 ```
+
+`transform.type` is the analytic collider kind (0 box, 1 sphere, 2 cylinder, 3 plane) and is
+meaningful only on `analyticShapes`. **Added 2026-08-24** — it was missing from the original
+shape, and `SceneExtractor` switches on it to decide what to rasterize, so without it every
+sphere and cylinder in a captured zone silently became a box. Caught by building the same
+scene twice, once through the wire path: 7467 polys against 7527 on Limsa Lominsa Lower
+Decks. Counts and transforms all matched; only the mesh disagreed.
 
 Collision file *contents* are not shipped — `meshPaths`/`terrains` are sqpack paths the
 server reads itself via Lumina (its builder already does). Note for the server's line
@@ -123,13 +272,21 @@ does; from there the normal `zoneStatus`/`getMesh`/seed machinery takes over.
 
 ### `reportTraversal`
 `{ cacheKey, from: [x,y,z], to: [x,y,z], mode: "walk"|"fly"|"direct", success: bool, note? }`
-→ `{ ok }` (spec'd 2026-08-23; server implementation pending)
+→ `{ ok }` (spec'd 2026-08-23; **implemented server-side 2026-08-24**)
 Feedback channel from execution back into the mesh (Ariadne PLAN.md §2): the follower (or
 a consumer like Odysseus) reports that a traversal succeeded where the mesh said no-path
 (`mode: "direct"`, `success: true` = off-mesh-link candidate for the OverrideStore) or
 that a planned leg failed (`success: false` = block/cost-paint candidate). Server
-accumulates evidence; nothing is auto-applied without the viewer's edit workflow unless
-Mnemosyne decides otherwise. Fire-and-forget, idempotent, best-effort.
+accumulates evidence; nothing is auto-applied. Fire-and-forget, idempotent, best-effort.
+
+Server behaviour (2026-08-24): reports land in `%APPDATA%\Mnemosyne\evidence\<bg-key>.json`,
+split into link candidates (`mode: "direct"`, `success: true`) and block candidates
+(`success: false`). A successful *planned* leg is stored as nothing — the follower reports
+every leg and only the surprising ones are evidence. Reports within 5 m of an existing one
+merge into a `count` rather than adding a row, since a follower re-reports the same doorway
+from a slightly different spot on every attempt. The viewer's edit mode draws them as dashed
+candidates, cyan for links and amber for blocks; `Mnemosyne.Cli doors <zone> --record` files
+mesh-sealed doors into the same store.
 
 ### `notifyMeshBuilt`
 `{ cacheKey, path }` → `{ ok }`
@@ -164,6 +321,43 @@ Response gains optional `etaSeconds`: path length divided by the calibrated mode
 speed (`speeds.fly` for fly queries, `speeds.ground` otherwise); absent while the
 speed is uncalibrated. An estimate — mounting time, casting, and detours are the
 client's problem.
+
+### Multi-client (fleet) semantics  (spec'd 2026-08-24 — up to 4+ game clients per PC)
+
+One Mnemosyne service serves every Ariadne on the machine. Rules:
+
+- **One service, many clients.** The service holds a single-instance mutex
+  (`Global\MnemosyneService`); a second launch exits immediately rather than racing for
+  the pipe. Ariadne may spawn the service when the pipe is absent — spawning is
+  idempotent by construction, so all four clients starting at once is safe.
+- **Client identity is the connection.** The server tags every request with the pipe
+  connection it arrived on; no id is required in the envelope. `updateGameState` should
+  additionally carry `character?: string` and `contentId?: number` for display and
+  stable identity across reconnects. Ariadne sends `character` as `"Name@World"` and omits
+  `contentId` — this Dalamud API version exposes no local content id, and a bare character
+  name is not unique across worlds. Treat `character` as the human-facing label and the
+  connection as the identity; `contentId` stays in the spec for a client that has one.
+- **Per-client state, not global.** Anything that used to be a single latest value is
+  now keyed by connection: pushed game state, `pathfindInProgress`, `pathfindNumQueued`.
+  A client only ever sees its own counters, matching vnavmesh's per-process semantics.
+- **`getGameState` returns the fleet:**
+
+```
+getGameState { } → { ok, present, players: [ { clientId, character?, contentId?,
+                     cacheKey, territoryId, pos, rotation, flying, speed, ageMs } ],
+                     speeds: { ground, fly }, ...legacy single-player fields }
+```
+
+  The legacy top-level fields (`pos`, `cacheKey`, …) mirror the **most recently updated**
+  player so existing consumers keep working; new consumers read `players`. Entries older
+  than the 5 s staleness window are dropped from the list, and `present` is
+  `players.length > 0`.
+- **Shared, not per-client:** the zone cache, built store, override store and speed
+  calibration are machine-wide by design — four toons in the same zone load it once.
+  The warm-zone LRU is sized for a fleet (≥ 8) so four clients in four zones do not
+  thrash it.
+- **Fairness:** queries are per-zone locked, so clients in different zones never block
+  each other; clients in the *same* zone serialize briefly on that zone's query object.
 
 ## Error/liveness conventions
 

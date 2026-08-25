@@ -5,7 +5,7 @@ namespace Ariadne.Tests;
 public class GameStatePusherTests
 {
     private static GameStateSample Sample(float x = 0) =>
-        new("zone_a", 129, new Vector3(x, 0, 0), 1.5f, false);
+        new("zone_a", 129, new Vector3(x, 0, 0), 1.5f, false, "Tester@Testworld");
 
     [Fact]
     public void Throttles_ToOnePushPerInterval()

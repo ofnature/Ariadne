@@ -5,7 +5,12 @@ using System.Threading.Tasks;
 
 namespace Ariadne;
 
-internal sealed record GameStateSample(string CacheKey, uint TerritoryId, Vector3 Pos, float Rotation, bool Flying);
+// Character is the fleet discriminator: one Mnemosyne service serves every game client
+// on the PC, so a sample has to say which toon it describes. It is "Name@World" rather
+// than a content id because this Dalamud API version exposes no local content id, and
+// name alone is not unique across worlds.
+internal sealed record GameStateSample(string CacheKey, uint TerritoryId, Vector3 Pos, float Rotation, bool Flying,
+    string Character);
 
 // Feeds the player's live position to Mnemosyne's viewer (~10 Hz, per the updateGameState
 // spec in docs/mnemosyne-protocol.md). Tick() runs on the framework thread — the sample

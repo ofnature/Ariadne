@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Ariadne;
@@ -110,26 +111,118 @@ internal sealed class MeshBroker : IDisposable
         return await SeedAsync(key).ConfigureAwait(false);
     }
 
-    public async Task<List<Vector3>> FindPathAsync(Vector3 from, Vector3 to, bool fly)
+    /// <summary>A route plus the server's own account of it. `Result` is never empty: a
+    /// legacy server that says nothing is reported as "ok" when waypoints came back and
+    /// "unreachable" when they did not, per the protocol doc's legacy rule.</summary>
+    public sealed record PathAnswer(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial);
+
+    public async Task<List<Vector3>> FindPathAsync(Vector3 from, Vector3 to, bool fly,
+        float? tolerance = null, Vector3? avoidCenter = null, float avoidRadius = 0)
+        => (await FindPathDetailedAsync(from, to, fly, tolerance, avoidCenter, avoidRadius).ConfigureAwait(false)).Waypoints;
+
+    public async Task<PathAnswer> FindPathDetailedAsync(Vector3 from, Vector3 to, bool fly,
+        float? tolerance = null, Vector3? avoidCenter = null, float avoidRadius = 0)
     {
         var key = _currentKey;
         if (key.Length == 0)
         {
             Activity("findPath rejected: zone not ready");
-            return [];
+            return new PathAnswer("meshNotReady", [], null, false);
         }
 
         var sw = Stopwatch.StartNew();
-        var resp = await _client.FindPathAsync(key, [from.X, from.Y, from.Z], [to.X, to.Y, to.Z], fly).ConfigureAwait(false);
+        Interlocked.Increment(ref _pathfindQueued);
+        FindPathResponse? resp;
+        try
+        {
+            resp = await _client.FindPathAsync(key, [from.X, from.Y, from.Z], [to.X, to.Y, to.Z], fly,
+                tolerance,
+                avoidCenter is { } c ? [c.X, c.Y, c.Z] : null,
+                avoidRadius).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _pathfindQueued);
+        }
+        var nearest = resp?.Nearest is { Length: >= 3 } n ? new Vector3(n[0], n[1], n[2]) : (Vector3?)null;
         if (resp is not { Ok: true, Waypoints: { } waypoints })
         {
-            Activity($"findPath failed: {resp?.Error ?? "Mnemosyne unavailable"}");
-            return [];
+            // The whole point of the classified answers: say *why*, so the caller acts once.
+            var why = resp?.Result ?? (resp == null ? "meshNotReady" : "unreachable");
+            var near = nearest is { } np ? $" nearest {np:0.0}" : "";
+            Activity($"findPath [{why}]{near}: {resp?.Error ?? "Mnemosyne unavailable"}");
+            return new PathAnswer(why, [], nearest, false);
         }
 
-        var qualifiers = (resp.Partial ? " partial" : "") + (resp.Result is { } r and not "ok" ? $" [{r}]" : "");
+        var result = resp.Result ?? (waypoints.Length > 0 ? "ok" : "unreachable"); // legacy server
+        var qualifiers = (resp.Partial ? " partial" : "") + (result is not "ok" ? $" [{result}]" : "");
         Activity($"findPath: {waypoints.Length} waypoints{qualifiers} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
-        return [.. waypoints.Where(w => w.Length >= 3).Select(w => new Vector3(w[0], w[1], w[2]))];
+        return new PathAnswer(result,
+            [.. waypoints.Where(w => w.Length >= 3).Select(w => new Vector3(w[0], w[1], w[2]))],
+            nearest, resp.Partial);
+    }
+
+    // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------
+    // Backs the Ariadne.Nav.* / Ariadne.Query.Mesh.* IPC gates. These exist so a consumer
+    // can be pointed at Mnemosyne while vnavmesh is still installed and the answers
+    // compared side by side, before Ariadne claims the vnavmesh.* names.
+
+    private int _pathfindQueued;
+    private volatile float _buildProgress = -1;
+
+    /// <summary>vnavmesh's Nav.IsReady: a usable mesh for the current zone is in hand.</summary>
+    public bool NavIsReady => Current.Status is ZoneMeshStatus.LocalCurrent or ZoneMeshStatus.MnemosyneCached;
+
+    /// <summary>vnavmesh's Nav.BuildProgress: 0..1 while building, -1 when idle. Refreshed
+    /// by the zone poll, so it lags a build by at most one poll interval.</summary>
+    public float NavBuildProgress => _buildProgress;
+
+    public bool PathfindInProgress => Volatile.Read(ref _pathfindQueued) > 0;
+    public int PathfindNumQueued => Volatile.Read(ref _pathfindQueued);
+
+    public async Task<Vector3?> NearestPointAsync(Vector3 p, float halfExtentXZ, float halfExtentY, bool reachableOnly)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+            return null;
+        var resp = await _client.NearestPointAsync(key, [p.X, p.Y, p.Z], halfExtentXZ, halfExtentY, reachableOnly).ConfigureAwait(false);
+        return resp is { Ok: true, Found: true, Point: { Length: >= 3 } pt } ? new Vector3(pt[0], pt[1], pt[2]) : null;
+    }
+
+    public async Task<bool> IsPointOnMeshAsync(Vector3 p, float halfExtentY, bool allowUnreachable)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+            return false;
+        var resp = await _client.IsPointOnMeshAsync(key, [p.X, p.Y, p.Z], halfExtentY, allowUnreachable).ConfigureAwait(false);
+        return resp is { Ok: true, OnMesh: true };
+    }
+
+    public async Task<Vector3?> PointOnFloorAsync(Vector3 p, float halfExtentXZ, bool allowUnreachable)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+            return null;
+        var resp = await _client.PointOnFloorAsync(key, [p.X, p.Y, p.Z], halfExtentXZ, allowUnreachable).ConfigureAwait(false);
+        return resp is { Ok: true, Found: true, Point: { Length: >= 3 } pt } ? new Vector3(pt[0], pt[1], pt[2]) : null;
+    }
+
+    /// <summary>Returns the written path (Mnemosyne owns the output directory), or "" on
+    /// failure. vnavmesh returns void here; the path is strictly more useful.</summary>
+    public async Task<string> BuildBitmapAsync(List<Vector3> startingPoints, string filename, float pixelSize,
+        Vector3? minBounds = null, Vector3? maxBounds = null)
+    {
+        var key = _currentKey;
+        if (key.Length == 0 || startingPoints.Count == 0)
+            return "";
+        var starts = new float[startingPoints.Count][];
+        for (var i = 0; i < startingPoints.Count; ++i)
+            starts[i] = [startingPoints[i].X, startingPoints[i].Y, startingPoints[i].Z];
+        var resp = await _client.BuildBitmapAsync(key, starts, filename, pixelSize,
+            minBounds is { } lo ? [lo.X, lo.Y, lo.Z] : null,
+            maxBounds is { } hi ? [hi.X, hi.Y, hi.Z] : null).ConfigureAwait(false);
+        Activity($"buildBitmap '{filename}': {(resp is { Ok: true } ? resp.Path : resp?.Error ?? "unavailable")}");
+        return resp is { Ok: true, Path: { } outPath } ? outPath : "";
     }
 
     /// <summary>Forward execution feedback (traversal succeeded off-mesh / planned leg
@@ -233,6 +326,7 @@ internal sealed class MeshBroker : IDisposable
             return new Snapshot(cacheKey, ZoneMeshStatus.LocalCurrent, _seeder.TargetPath(cacheKey), DateTime.UtcNow);
 
         var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
+        _buildProgress = status?.Progress ?? -1;
         if (status == null)
             return new Snapshot(cacheKey, ZoneMeshStatus.MnemosyneUnavailable, null, DateTime.UtcNow);
         if (status is not { Ok: true, Status: "cached" })

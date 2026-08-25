@@ -39,6 +39,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly PathIsRunningSignal _signal;
     private readonly PathFollower _follower;
     private readonly MoveRequest _move;
+    private readonly DtrProvider _dtr;
+    private readonly WaypointOverlay _overlay;
     private readonly AriadneIpc _ipc;
     private readonly MainWindow _mainWindow;
 
@@ -52,7 +54,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         var vnavCacheDir = Path.Combine(
             PluginInterface.ConfigDirectory.Parent!.FullName, "vnavmesh", "meshcache");
 
-        var client = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m));
+        var client = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m),
+            serviceExePath: () => _config.AutoStartMnemosyne ? _config.MnemosyneServicePath : null);
         var vnav = new VnavIpc(PluginInterface, m => Log.Information(m));
         _broker = new MeshBroker(client, new CacheSeeder(vnavCacheDir), vnav,
             () => _config.AutoSeed, () => _config.BuildOnMiss,
@@ -76,7 +79,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         Framework.Update += OnFrameworkTick;
 
         _pusher = new GameStatePusher(SampleGameState,
-            s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying));
+            s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying,
+                s.Character));
 
         _signal = new PathIsRunningSignal(PluginInterface, () => _config.MirrorVnavPathIsRunning);
         _follower = new PathFollower(_config, _signal);
@@ -89,6 +93,10 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
+        _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);
+        _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
+
+        PluginInterface.UiBuilder.Draw += _overlay.Draw;
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi += OpenMain;
@@ -105,7 +113,9 @@ public sealed class AriadnePlugin : IDalamudPlugin
     {
         CommandManager.RemoveHandler(CommandMain);
         Framework.Update -= OnFrameworkTick;
+        PluginInterface.UiBuilder.Draw -= _overlay.Draw;
         PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
+        _dtr.Dispose();
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
         _windowSystem.RemoveAllWindows();
@@ -123,6 +133,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _pusher.Tick();
         _follower.Update(fwk);
         _move.Update();
+        _dtr.Update();
     }
 
     // Runs on the framework thread (safe to touch game state); null while loading or logged out.
@@ -135,7 +146,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         if (player == null)
             return null;
         return new GameStateSample(cacheKey, ClientState.TerritoryType, player.Position, player.Rotation,
-            Condition[ConditionFlag.InFlight] || Condition[ConditionFlag.Diving]);
+            Condition[ConditionFlag.InFlight] || Condition[ConditionFlag.Diving],
+            $"{player.Name.TextValue}@{player.HomeWorld.Value.Name}");
     }
 
     private void OnCommand(string command, string args) => OpenMain();

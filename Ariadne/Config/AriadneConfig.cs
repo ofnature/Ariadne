@@ -41,9 +41,26 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// before giving up. Recoveries that gain ground don't count against this.</summary>
     public int StallRetries { get; set; } = 3;
 
+    // ---- UI / overlay ----
+
+    /// <summary>Show the Ariadne entry in the server info bar (DTR).</summary>
+    public bool EnableDtrBar { get; set; } = true;
+    /// <summary>Append live query/movement detail to the DTR entry.</summary>
+    public bool DtrShowDetail { get; set; } = true;
+    /// <summary>Draw the active path's waypoints in the world while following.</summary>
+    public bool ShowWaypoints { get; set; } = true;
+
     /// <summary>Also publish the shared-data flag under vnavmesh's name
     /// (<c>vnav.PathIsRunning</c>) so plugins that yield movement to vnavmesh — BossMod's
     /// "someone else is driving" check — yield to Ariadne unmodified. Ariadne's own
     /// <c>ariadne.PathIsRunning</c> is always published.</summary>
     public bool MirrorVnavPathIsRunning { get; set; } = true;
+
+    /// <summary>Start Mnemosyne.Service when the pipe is absent instead of waiting for the
+    /// user to. Safe with several game clients running: the service is single-instance.</summary>
+    public bool AutoStartMnemosyne { get; set; } = true;
+
+    /// <summary>Explicit path to Mnemosyne.Service.exe. Empty = read the path Mnemosyne
+    /// stamps at <c>%APPDATA%\Mnemosyne\service.path</c> on every run.</summary>
+    public string MnemosyneServicePath { get; set; } = "";
 }

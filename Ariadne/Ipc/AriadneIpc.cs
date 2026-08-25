@@ -29,6 +29,45 @@ internal sealed class AriadneIpc : IDisposable
         // said no ("direct"), or a planned leg that failed — becomes override evidence
         RegisterFunc("ReportTraversal", (Vector3 from, Vector3 to, string mode, bool success) => broker.ReportTraversalAsync(from, to, mode, success));
 
+        // ---- vnavmesh gate parity, under the Ariadne. prefix (added 2026-08-24) ----------
+        // Deliberately NOT registered as vnavmesh.* yet: with both prefixes live a consumer
+        // can call Ariadne.Query.Mesh.NearestPoint and vnavmesh.Query.Mesh.NearestPoint on
+        // the same input and diff the answers. Once those agree across a zone sweep, the
+        // cutover is just re-registering these names.
+        // Shape note: vnavmesh serves these synchronously from an in-process mesh; ours
+        // cross a pipe, so they return Task<T>. The sync-shaped aliases come with the
+        // cutover (Phase 2) — either a bounded blocking wait or a locally cached query.
+        RegisterFunc("Nav.IsReady", () => broker.NavIsReady);
+        RegisterFunc("Nav.BuildProgress", () => broker.NavBuildProgress);
+        RegisterFunc("Nav.Pathfind", (Vector3 from, Vector3 to, bool fly) => broker.FindPathAsync(from, to, fly));
+        RegisterFunc("Nav.PathfindWithTolerance", (Vector3 from, Vector3 to, bool fly, float tolerance)
+            => broker.FindPathAsync(from, to, fly, tolerance));
+        RegisterFunc("Nav.PathfindAvoid", (Vector3 from, Vector3 to, bool fly, Vector3 avoidCenter, float avoidRadius)
+            => broker.FindPathAsync(from, to, fly, null, avoidCenter, avoidRadius));
+        // The classified answer, which the vnavmesh-shaped gates structurally cannot carry:
+        // they return a bare list, so "no path" and "your goal is 2 y off the mesh, stand
+        // here instead" look identical. Returns (result, waypoints, nearest, partial).
+        RegisterFunc("Nav.PathfindDetailed", (Vector3 from, Vector3 to, bool fly) =>
+            broker.FindPathDetailedAsync(from, to, fly)
+                .ContinueWith(t => (t.Result.Result, t.Result.Waypoints, t.Result.Nearest, t.Result.Partial)));
+        RegisterFunc("Nav.PathfindInProgress", () => broker.PathfindInProgress);
+        RegisterFunc("Nav.PathfindNumQueued", () => broker.PathfindNumQueued);
+
+        RegisterFunc("Query.Mesh.NearestPoint", (Vector3 p, float halfExtentXZ, float halfExtentY)
+            => broker.NearestPointAsync(p, halfExtentXZ, halfExtentY, false));
+        RegisterFunc("Query.Mesh.NearestPointReachable", (Vector3 p, float halfExtentXZ, float halfExtentY)
+            => broker.NearestPointAsync(p, halfExtentXZ, halfExtentY, true));
+        RegisterFunc("Query.Mesh.IsPointOnMesh", (Vector3 p, float halfExtentY, bool allowUnreachable)
+            => broker.IsPointOnMeshAsync(p, halfExtentY, allowUnreachable));
+        RegisterFunc("Query.Mesh.PointOnFloor", (Vector3 p, float halfExtentXZ, bool allowUnreachable)
+            => broker.PointOnFloorAsync(p, halfExtentXZ, allowUnreachable));
+
+        RegisterFunc("Nav.BuildBitmap", (List<Vector3> starts, string filename, float pixelSize)
+            => broker.BuildBitmapAsync(starts, filename, pixelSize));
+        RegisterFunc("Nav.BuildBitmapBounded", (List<Vector3> starts, string filename, float pixelSize, Vector3[] bounds)
+            => broker.BuildBitmapAsync(starts, filename, pixelSize,
+                bounds.Length > 0 ? bounds[0] : null, bounds.Length > 1 ? bounds[1] : null));
+
         // movement — same shapes as vnavmesh's Path.* / SimpleMove.* so a compat alias layer is trivial later
         RegisterAction("Path.MoveTo", (List<Vector3> waypoints, bool fly) => follower.Move(waypoints, fly));
         RegisterAction("Path.Stop", move.Stop);
@@ -73,6 +112,13 @@ internal sealed class AriadneIpc : IDisposable
     private void RegisterFunc<TRet, T1, T2, T3, T4>(string name, Func<T1, T2, T3, T4, TRet> func)
     {
         var p = _pluginInterface.GetIpcProvider<T1, T2, T3, T4, TRet>("Ariadne." + name);
+        p.RegisterFunc(func);
+        _disposeActions.Add(p.UnregisterFunc);
+    }
+
+    private void RegisterFunc<TRet, T1, T2, T3, T4, T5>(string name, Func<T1, T2, T3, T4, T5, TRet> func)
+    {
+        var p = _pluginInterface.GetIpcProvider<T1, T2, T3, T4, T5, TRet>("Ariadne." + name);
         p.RegisterFunc(func);
         _disposeActions.Add(p.UnregisterFunc);
     }

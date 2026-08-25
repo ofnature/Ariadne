@@ -11,9 +11,8 @@ using System.Threading.Tasks;
 namespace Ariadne.Windows;
 
 /// <summary>
-/// The whole bridge on one screen: Mnemosyne connection, current zone and its mesh status,
-/// vnavmesh's view of the world, manual overrides for everything the broker does
-/// automatically, and the recent-activity trail that explains what just happened.
+/// The whole bridge on one screen, two tabs: Status (connection, zone, vnavmesh,
+/// movement, timings, activity) and Config (every persisted knob).
 /// </summary>
 internal sealed class MainWindow : Window
 {
@@ -62,7 +61,7 @@ internal sealed class MainWindow : Window
         _move = move;
         _playerPosition = playerPosition;
 
-        Size = new Vector2(560, 480);
+        Size = new Vector2(560, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints
         {
@@ -73,14 +72,28 @@ internal sealed class MainWindow : Window
 
     public override void Draw()
     {
-        DrawMnemosyne();
-        DrawZone();
-        DrawVnavmesh();
-        DrawActions();
-        DrawMovement();
-        DrawTimings();
-        DrawActivity();
+        if (!ImGui.BeginTabBar("##tabs"))
+            return;
+        if (ImGui.BeginTabItem("Status"))
+        {
+            DrawMnemosyne();
+            DrawZone();
+            DrawVnavmesh();
+            DrawActions();
+            DrawMovement();
+            DrawTimings();
+            DrawActivity();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Config"))
+        {
+            DrawConfig();
+            ImGui.EndTabItem();
+        }
+        ImGui.EndTabBar();
     }
+
+    // ---- Status tab ----
 
     private void DrawMnemosyne()
     {
@@ -153,20 +166,6 @@ internal sealed class MainWindow : Window
 
     private void DrawActions()
     {
-        var autoSeed = _config.AutoSeed;
-        if (ImGui.Checkbox("Auto-seed vnavmesh cache on zone load", ref autoSeed))
-        {
-            _config.AutoSeed = autoSeed;
-            _saveConfig();
-        }
-        ImGui.SameLine();
-        var buildOnMiss = _config.BuildOnMiss;
-        if (ImGui.Checkbox("Build missing meshes (capture → Mnemosyne)", ref buildOnMiss))
-        {
-            _config.BuildOnMiss = buildOnMiss;
-            _saveConfig();
-        }
-
         if (ImGui.Button("Refresh"))
             _ = _broker.RefreshAsync();
         ImGui.SameLine();
@@ -175,7 +174,6 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         if (ImGui.Button("Reload vnavmesh"))
             _vnav.Reload();
-
         ImGui.Separator();
     }
 
@@ -224,28 +222,6 @@ internal sealed class MainWindow : Window
         {
             ImGui.SameLine();
             ImGui.TextColored(Grey, _lastPathResult);
-        }
-
-        var align = _config.AlignCameraToMovement;
-        if (ImGui.Checkbox("Align camera", ref align)) { _config.AlignCameraToMovement = align; _saveConfig(); }
-        ImGui.SameLine();
-        var cancel = _config.CancelMoveOnUserInput;
-        if (ImGui.Checkbox("Cancel on input", ref cancel)) { _config.CancelMoveOnUserInput = cancel; _saveConfig(); }
-        ImGui.SameLine();
-        var stalls = _config.DetectStalls;
-        if (ImGui.Checkbox("Recover from stalls", ref stalls)) { _config.DetectStalls = stalls; _saveConfig(); }
-        if (_config.DetectStalls)
-        {
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(80);
-            var retries = _config.StallRetries;
-            if (ImGui.InputInt("retries", ref retries)) { _config.StallRetries = Math.Clamp(retries, 0, 20); _saveConfig(); }
-        }
-        var mirror = _config.MirrorVnavPathIsRunning;
-        if (ImGui.Checkbox("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", ref mirror))
-        {
-            _config.MirrorVnavPathIsRunning = mirror;
-            _saveConfig();
         }
         ImGui.Separator();
     }
@@ -297,13 +273,6 @@ internal sealed class MainWindow : Window
         ImGui.Separator();
     }
 
-    private static string FormatDuration(double seconds) => seconds switch
-    {
-        < 10 => $"{seconds:0.00}s",
-        < 120 => $"{seconds:0.0}s",
-        _ => $"{(int)seconds / 60}m{(int)seconds % 60:00}s",
-    };
-
     private void DrawActivity()
     {
         ImGui.TextUnformatted("Activity");
@@ -315,6 +284,75 @@ internal sealed class MainWindow : Window
         }
         ImGui.EndChild();
     }
+
+    // ---- Config tab ----
+
+    private void DrawConfig()
+    {
+        ImGui.TextColored(Grey, "Meshes");
+        Toggle("Auto-seed vnavmesh cache on zone load", () => _config.AutoSeed, v => _config.AutoSeed = v);
+        Toggle("Build missing meshes (capture → Mnemosyne)", () => _config.BuildOnMiss, v => _config.BuildOnMiss = v);
+        ImGui.Separator();
+
+        ImGui.TextColored(Grey, "Movement");
+        Toggle("Align camera to movement direction", () => _config.AlignCameraToMovement, v => _config.AlignCameraToMovement = v);
+        if (_config.AlignCameraToMovement)
+        {
+            ImGui.SetNextItemWidth(200);
+            var height = _config.AlignCameraHeight;
+            if (ImGui.SliderFloat("Camera height (degrees)", ref height, -75, 75))
+            {
+                _config.AlignCameraHeight = height;
+                _saveConfig();
+            }
+        }
+        Toggle("Cancel current path on player movement input", () => _config.CancelMoveOnUserInput, v => _config.CancelMoveOnUserInput = v);
+        Toggle("Recover from movement stalls", () => _config.DetectStalls, v => _config.DetectStalls = v);
+        if (_config.DetectStalls)
+        {
+            ImGui.SetNextItemWidth(100);
+            var retries = _config.StallRetries;
+            if (ImGui.InputInt("Futile re-paths before giving up", ref retries))
+            {
+                _config.StallRetries = Math.Clamp(retries, 0, 20);
+                _saveConfig();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Re-paths that gain ≥10y toward the destination don't count — only consecutive futile ones.");
+        }
+        ImGui.Separator();
+
+        ImGui.TextColored(Grey, "Overlay & info bar");
+        Toggle("Show active waypoints", () => _config.ShowWaypoints, v => _config.ShowWaypoints = v);
+        Toggle("Enable server info bar entry (DTR)", () => _config.EnableDtrBar, v => _config.EnableDtrBar = v);
+        if (_config.EnableDtrBar)
+        {
+            ImGui.Indent();
+            Toggle("Show detailed query status in DTR", () => _config.DtrShowDetail, v => _config.DtrShowDetail = v);
+            ImGui.Unindent();
+        }
+        ImGui.Separator();
+
+        ImGui.TextColored(Grey, "Integration");
+        Toggle("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", () => _config.MirrorVnavPathIsRunning, v => _config.MirrorVnavPathIsRunning = v);
+    }
+
+    private void Toggle(string label, Func<bool> get, Action<bool> set)
+    {
+        var value = get();
+        if (ImGui.Checkbox(label, ref value))
+        {
+            set(value);
+            _saveConfig();
+        }
+    }
+
+    private static string FormatDuration(double seconds) => seconds switch
+    {
+        < 10 => $"{seconds:0.00}s",
+        < 120 => $"{seconds:0.0}s",
+        _ => $"{(int)seconds / 60}m{(int)seconds % 60:00}s",
+    };
 
     private static void DrawKeyValue(string label, string value)
     {

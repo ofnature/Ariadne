@@ -14,6 +14,12 @@ public sealed class TransformDto
     public float[] T { get; set; } = []; // translation xyz
     public float[] R { get; set; } = []; // rotation quaternion xyzw
     public float[] S { get; set; } = []; // scale xyz
+
+    /// <summary>Analytic collider kind (0 box, 1 sphere, 2 cylinder, 3 plane), carried on
+    /// analytic-shape transforms only. SceneExtractor switches on this to decide what to
+    /// rasterize — omitting it turns every sphere and cylinder in the zone into a box.
+    /// Added 2026-08-24 after an offline round-trip built a mesh 60 polys light.</summary>
+    public int Type { get; set; }
 }
 
 public sealed class AnalyticShapeDto
@@ -122,6 +128,7 @@ internal static class SceneCapture
         T = ToArray(t.Translation),
         R = [t.Rotation.X, t.Rotation.Y, t.Rotation.Z, t.Rotation.W],
         S = ToArray(t.Scale),
+        Type = t.Type,
     };
 
     private static float[] ToArray(Vector3 v) => [v.X, v.Y, v.Z];

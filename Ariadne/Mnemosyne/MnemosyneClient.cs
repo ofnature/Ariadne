@@ -36,12 +36,18 @@ internal sealed class MnemosyneClient : IDisposable
     private DateTime _nextConnectAttempt = DateTime.MinValue;
     private TimeSpan _backoff = InitialBackoff;
 
-    public MnemosyneClient(Action<string> logInfo, Action<string> logWarning, string pipeName = Protocol.PipeName)
+    /// <summary><paramref name="serviceExePath"/> supplies the configured Mnemosyne.Service
+    /// path (null/empty = auto-discover); pass null to disable autostart entirely.</summary>
+    public MnemosyneClient(Action<string> logInfo, Action<string> logWarning, string pipeName = Protocol.PipeName,
+        Func<string?>? serviceExePath = null)
     {
         _pipeName = pipeName;
         _logInfo = logInfo;
         _logWarning = logWarning;
+        _serviceExePath = serviceExePath;
     }
+
+    private readonly Func<string?>? _serviceExePath;
 
     private bool _disposed;
 
@@ -79,7 +85,8 @@ internal sealed class MnemosyneClient : IDisposable
 
     /// <summary>Best-effort ~10 Hz player-position push for Mnemosyne's viewer; dropped
     /// samples are harmless (server keeps only the latest).</summary>
-    public Task<Response?> UpdateGameStateAsync(string cacheKey, uint territoryId, float[] pos, float rotation, bool flying, CancellationToken cancel = default)
+    public Task<Response?> UpdateGameStateAsync(string cacheKey, uint territoryId, float[] pos, float rotation, bool flying,
+        string? character = null, ulong contentId = 0, CancellationToken cancel = default)
         => SendAsync<Response>(new Request
         {
             Op = "updateGameState",
@@ -88,6 +95,55 @@ internal sealed class MnemosyneClient : IDisposable
             Pos = pos,
             Rotation = rotation,
             Flying = flying,
+            // fleet identity: one service serves every game client on this PC, so say who we are
+            Character = character,
+            ContentId = contentId == 0 ? null : contentId,
+        }, cancel);
+
+    // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------
+    // These back the Ariadne.Nav.* / Ariadne.Query.Mesh.* IPC gates so consumers can be
+    // pointed at Mnemosyne while vnavmesh is still installed, and the two compared.
+
+    public Task<FindPathResponse?> FindPathAsync(string cacheKey, float[] from, float[] to, bool fly,
+        float? tolerance, float[]? avoidCenter, float avoidRadius, CancellationToken cancel = default)
+        => SendAsync<FindPathResponse>(new Request
+        {
+            Op = "findPath", CacheKey = cacheKey, From = from, To = to, Fly = fly,
+            Tolerance = tolerance,
+            AvoidCenter = avoidCenter,
+            AvoidRadius = avoidCenter == null ? null : avoidRadius,
+        }, cancel);
+
+    public Task<PointResponse?> NearestPointAsync(string cacheKey, float[] point, float halfExtentXZ, float halfExtentY,
+        bool reachableOnly, CancellationToken cancel = default)
+        => SendAsync<PointResponse>(new Request
+        {
+            Op = "nearestPoint", CacheKey = cacheKey, Point = point,
+            HalfExtentXZ = halfExtentXZ, HalfExtentY = halfExtentY, ReachableOnly = reachableOnly,
+        }, cancel);
+
+    public Task<OnMeshResponse?> IsPointOnMeshAsync(string cacheKey, float[] point, float halfExtentY,
+        bool allowUnreachable, CancellationToken cancel = default)
+        => SendAsync<OnMeshResponse>(new Request
+        {
+            Op = "isPointOnMesh", CacheKey = cacheKey, Point = point,
+            HalfExtentY = halfExtentY, AllowUnreachable = allowUnreachable,
+        }, cancel);
+
+    public Task<PointResponse?> PointOnFloorAsync(string cacheKey, float[] point, float halfExtentXZ,
+        bool allowUnreachable, CancellationToken cancel = default)
+        => SendAsync<PointResponse>(new Request
+        {
+            Op = "pointOnFloor", CacheKey = cacheKey, Point = point,
+            HalfExtentXZ = halfExtentXZ, AllowUnreachable = allowUnreachable,
+        }, cancel);
+
+    public Task<BitmapResponse?> BuildBitmapAsync(string cacheKey, float[][] startingPoints, string filename,
+        float pixelSize, float[]? minBounds, float[]? maxBounds, CancellationToken cancel = default)
+        => SendAsync<BitmapResponse>(new Request
+        {
+            Op = "buildBitmap", CacheKey = cacheKey, StartingPoints = startingPoints, Filename = filename,
+            PixelSize = pixelSize, MinBounds = minBounds, MaxBounds = maxBounds,
         }, cancel);
 
     private async Task<TResp?> SendAsync<TResp>(Request request, CancellationToken cancel) where TResp : Response
@@ -152,6 +208,15 @@ internal sealed class MnemosyneClient : IDisposable
 
         if (DateTime.UtcNow < _nextConnectAttempt)
             return false;
+
+        // No pipe at all means nobody is serving meshes. Start the service rather than
+        // making the user remember to; the connect below will still fail this cycle (the
+        // server needs a moment to listen) and the normal backoff retry picks it up.
+        // Named pipes surface in the filesystem namespace, so this is an exact test and
+        // costs nothing — much better than eating the 2s connect timeout to find out.
+        // null from the provider means autostart is off; "" means "find it yourself"
+        if (_serviceExePath?.Invoke() is { } exeHint && !File.Exists($@"\\.\pipe\{_pipeName}"))
+            ServiceLauncher.TryLaunch(exeHint, _logInfo);
 
         try
         {

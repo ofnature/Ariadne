@@ -16,14 +16,16 @@ public class SceneCaptureDtoTests
         FestivalLayers = [0x27u],
         ZoneSGs = [1, 6, 0, 1, 0],
         Terrains = ["bg/ffxiv/sea_s1/twn/s1t2/collision"],
-        AnalyticShapes = [new() { Crc = 0xDEAD, Transform = T(), BbMin = [-1, -2, -3], BbMax = [1, 2, 3] }],
+        // type 2 = cylinder: the field the extractor switches on to decide what to rasterize
+        AnalyticShapes = [new() { Crc = 0xDEAD, Transform = T(2), BbMin = [-1, -2, -3], BbMax = [1, 2, 3] }],
         MeshPaths = [new() { Crc = 0xBEEF, Path = "bg/ffxiv/sea_s1/twn/s1t2/collision/tr0001.pcb" }],
         BgParts = [new() { Key = 0xFFFF_FFFF_FFFF_FFFEul, Transform = T(), Crc = 0xBEEF, MatId = 5, MatMask = ulong.MaxValue, Analytic = false }],
         Colliders = [new() { Key = 42, Transform = T(), Crc = 0xBEEF, MatId = 0, MatMask = 0, Type = 2 }],
         ExitRanges = [new() { Key = 7, Transform = T() }],
     };
 
-    private static TransformDto T() => new() { T = [1.5f, -2.5f, 3.5f], R = [0, 0, 0, 1], S = [1, 1, 1] };
+    private static TransformDto T(int type = 0) =>
+        new() { T = [1.5f, -2.5f, 3.5f], R = [0, 0, 0, 1], S = [1, 1, 1], Type = type };
 
     [Fact]
     public void RoundTrip_PreservesEverything()
@@ -38,6 +40,9 @@ public class SceneCaptureDtoTests
         Assert.Equal(ulong.MaxValue, back.BgParts[0].MatMask);
         Assert.Equal(new float[] { 1.5f, -2.5f, 3.5f }, back.Colliders[0].Transform.T);
         Assert.Equal(2, back.Colliders[0].Type);
+        // Transform.Type rides along on analytic shapes. It was missing from the wire until
+        // 2026-08-24, which silently rasterized every sphere and cylinder as a box.
+        Assert.Equal(2, back.AnalyticShapes[0].Transform.Type);
         Assert.Equal(2, back.InstanceCount);
     }
 

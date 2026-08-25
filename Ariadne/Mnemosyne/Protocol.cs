@@ -42,6 +42,24 @@ internal sealed class Request
 
     // buildZone field — the live scene capture
     public Zone.SceneCaptureDto? Scene { get; set; }
+
+    // --- added 2026-08-24 (Mnemosyne session): vnavmesh gate parity, spec'd in the
+    // protocol doc. Query.Mesh.* / Nav.BuildBitmap* / pathfind variants / fleet identity.
+    public float? Tolerance { get; set; }
+    public float[]? AvoidCenter { get; set; }
+    public float? AvoidRadius { get; set; }
+    public float[]? Point { get; set; }
+    public float? HalfExtentXZ { get; set; }
+    public float? HalfExtentY { get; set; }
+    public bool? ReachableOnly { get; set; }
+    public bool? AllowUnreachable { get; set; }
+    public float[][]? StartingPoints { get; set; }
+    public string? Filename { get; set; }
+    public float? PixelSize { get; set; }
+    public float[]? MinBounds { get; set; }
+    public float[]? MaxBounds { get; set; }
+    public string? Character { get; set; }
+    public ulong? ContentId { get; set; }
 }
 
 internal class Response
@@ -49,6 +67,11 @@ internal class Response
     public int Id { get; set; }
     public bool Ok { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>Why this answer looks the way it does, when ok/error alone would leave the
+    /// consumer guessing. Every `ok:false` carries one; `ok:true` carries one only when the
+    /// success is qualified. Tolerate unknown values — never treat one as fatal.</summary>
+    public string? Result { get; set; }
 }
 
 internal sealed class HelloResponse : Response
@@ -64,6 +87,10 @@ internal sealed class ZoneStatusResponse : Response
     public string? Status { get; set; } // "cached" | "missing" | "stale"
     public int Version { get; set; }
     public int Customization { get; set; }
+    public float Progress { get; set; } = -1; // 0..1 while building, -1 idle
+    public bool Building { get; set; }
+    public bool PathfindInProgress { get; set; }
+    public int PathfindNumQueued { get; set; }
 }
 
 internal sealed class GetMeshResponse : Response
@@ -74,12 +101,29 @@ internal sealed class GetMeshResponse : Response
     public long Size { get; set; }
 }
 
+internal sealed class PointResponse : Response
+{
+    public bool Found { get; set; }
+    public float[]? Point { get; set; }
+}
+
+internal sealed class OnMeshResponse : Response
+{
+    public bool OnMesh { get; set; }
+}
+
+internal sealed class BitmapResponse : Response
+{
+    public string? Path { get; set; }
+}
+
 internal sealed class FindPathResponse : Response
 {
     public float[][]? Waypoints { get; set; }
     public bool Partial { get; set; }
 
-    // classified answers (spec 2026-08-23); null from legacy servers
-    public string? Result { get; set; } // "ok" | "targetOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable"
+    // classified answers (spec 2026-08-23, served since 2026-08-24). Result lives on the
+    // base Response now, since every ok:false carries one. "ok" | "targetOffMesh" |
+    // "startOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable" | "avoidIgnored"
     public float[]? Nearest { get; set; }
 }

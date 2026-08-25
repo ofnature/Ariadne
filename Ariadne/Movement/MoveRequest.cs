@@ -96,7 +96,12 @@ internal sealed class MoveRequest : IDisposable
         _pendingRange = range;
         LastResult = "pathfinding…";
         _log($"[Move] {(fly ? "fly" : "walk")} to {dest:f1}{(range > 0 ? $" within {range}" : "")}");
-        _pending = _broker.FindPathAsync(from.Value, dest, fly);
+        // Hand the range to the planner as a goal tolerance, not just to the follower. An NPC
+        // behind a counter is an off-mesh goal: without a tolerance the server can only answer
+        // "targetOffMesh", while with one it re-plans to the nearest reachable spot and trims
+        // the tail, so the route ends where you can actually interact from. The follower still
+        // gets the range too - it decides when to stop walking.
+        _pending = _broker.FindPathAsync(from.Value, dest, fly, range > 0 ? range : null);
         return true;
     }
 

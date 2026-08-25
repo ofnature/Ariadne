@@ -191,6 +191,23 @@ internal sealed class MainWindow : Window
         else
             ImGui.TextColored(Grey, _move.LastResult.Length > 0 ? $"idle — last: {_move.LastResult}" : "idle");
 
+        if (Service.TargetManager.Target is { } tgt && _playerPosition() is { } me)
+        {
+            var dist = Vector3.Distance(me, tgt.Position);
+            ImGui.TextColored(Grey, "target");
+            ImGui.SameLine(90);
+            ImGui.TextUnformatted($"{tgt.Name.TextValue} — {dist:0.0}y");
+            ImGui.SameLine();
+            if (dist <= 3.5f)
+                ImGui.TextColored(Green, "can interact");
+            else if (dist <= 7f)
+                ImGui.TextColored(Yellow, "interact range (edge)");
+            else
+                ImGui.TextColored(Grey, "out of reach");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Interact range is ~7y; ≤3.5y is safely inside it (the margins Odysseus\nuses in the field). Some objects differ — gathering nodes are shorter.");
+        }
+
         ImGui.SetNextItemWidth(240);
         ImGui.InputFloat3("dest", ref _pathDest);
         ImGui.SameLine();

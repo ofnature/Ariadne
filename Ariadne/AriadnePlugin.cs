@@ -71,13 +71,6 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
 
         _zoneWatcher = new ZoneWatcher(Framework);
-        _zoneWatcher.KeyChanged += _ =>
-        {
-            _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
-            _tracker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
-            _overlay.PreviewPath = null; // world coordinates from the old zone are meaningless
-        };
-        Framework.Update += OnFrameworkTick;
 
         _pusher = new GameStatePusher(SampleGameState,
             s => client.UpdateGameStateAsync(s.CacheKey, s.TerritoryId, [s.Pos.X, s.Pos.Y, s.Pos.Z], s.Rotation, s.Flying,
@@ -106,6 +99,20 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             HelpMessage = "Open the Ariadne status window.",
         });
+
+        // Framework subscriptions go last, deliberately. Dalamud constructs plugins off the
+        // framework thread, so a tick can land in the middle of this constructor - and both
+        // handlers read fields assigned further down. Subscribing early threw a
+        // NullReferenceException out of IFramework::Update on load, every load, because
+        // ZoneWatcher hooks Update in its own constructor and fires KeyChanged on the first
+        // tick while _overlay was still null.
+        _zoneWatcher.KeyChanged += _ =>
+        {
+            _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+            _tracker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+            _overlay.PreviewPath = null; // world coordinates from the old zone are meaningless
+        };
+        Framework.Update += OnFrameworkTick;
 
         Log.Information($"Ariadne v{PluginVersion} loaded (vnav cache: {vnavCacheDir}).");
     }

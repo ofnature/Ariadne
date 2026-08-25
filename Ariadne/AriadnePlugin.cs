@@ -75,6 +75,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
             _tracker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+            _overlay.PreviewPath = null; // world coordinates from the old zone are meaningless
         };
         Framework.Update += OnFrameworkTick;
 
@@ -88,13 +89,13 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move);
 
+        _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher, _follower, _move,
+            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
         _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);
-        _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
 
         PluginInterface.UiBuilder.Draw += _overlay.Draw;
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;

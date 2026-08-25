@@ -30,6 +30,7 @@ internal sealed class MainWindow : Window
     private readonly GameStatePusher _pusher;
     private readonly PathFollower _follower;
     private readonly MoveRequest _move;
+    private readonly WaypointOverlay _overlay;
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
@@ -47,9 +48,11 @@ internal sealed class MainWindow : Window
         GameStatePusher pusher,
         PathFollower follower,
         MoveRequest move,
+        WaypointOverlay overlay,
         Func<Vector3?> playerPosition)
         : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
+        _overlay = overlay;
         _config = config;
         _saveConfig = saveConfig;
         _broker = broker;
@@ -233,8 +236,20 @@ internal sealed class MainWindow : Window
                 _ = Task.Run(async () =>
                 {
                     var path = await _broker.FindPathAsync(from, dest, fly);
+                    _overlay.PreviewPath = path.Count > 0 ? path : null;
                     _lastPathResult = path.Count > 0 ? $"{path.Count} waypoints" : "no path (see activity)";
                 });
+            }
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Query the path and draw it in the world (blue) without walking it.");
+        if (_overlay.PreviewPath is { Count: > 0 })
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Clear waypoints"))
+            {
+                _overlay.PreviewPath = null;
+                _lastPathResult = "";
             }
         }
         if (_lastPathResult.Length > 0)

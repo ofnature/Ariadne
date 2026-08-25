@@ -206,6 +206,17 @@ Request gains the vnavmesh pathfind variants:
   and when the goal itself is unreachable it retries against the nearest reachable point
   within `tolerance`. Same practical result for a follower, and it also answers the
   "goal is 1 y off-mesh" case that made consumers retry blindly.
+- **Interacting with an NPC: never path to the NPC.** NPC positions are routinely off-mesh -
+  behind a counter, on a dais, inside furniture - so asking for one is asking for a point the
+  navmesh does not contain. Pass the NPC position with `tolerance` set to the interaction
+  range (4-5 y covers most NPCs) and let the server stop you short: it retries against the
+  nearest reachable point and trims the tail inside the radius. Then read `result` - `ok`
+  means you are standing somewhere you can interact from, and `targetOffMesh` with `nearest`
+  means the NPC is further than the tolerance from anything walkable, so walk to `nearest` and
+  interact from there rather than retrying. This also avoids the endpoint caveat under
+  `clearance`: endpoints are never padded, so handing the follower a goal flush against a
+  counter makes the final approach graze it.
+
 - `avoidCenter?: [x,y,z]`, `avoidRadius?: <yalms>` — `Nav.PathfindAvoid`. Applies to
   **both ground and fly** legs. Two documented divergences from vnavmesh, both deliberate:
   - vnavmesh only engages avoid when the *straight* `from`→`to` segment enters the circle.

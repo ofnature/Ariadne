@@ -26,6 +26,7 @@ namespace Ariadne;
 public sealed class AriadnePlugin : IDalamudPlugin
 {
     private const string CommandMain = "/ariadne";
+    private const string CommandShort = "/aria";
 
     public static string PluginVersion { get; } =
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -99,6 +100,10 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             HelpMessage = "Open the Ariadne status window.",
         });
+        CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
+        {
+            HelpMessage = "Short alias for /ariadne.",
+        });
 
         // Framework subscriptions go last, deliberately. Dalamud constructs plugins off the
         // framework thread, so a tick can land in the middle of this constructor - and both
@@ -120,6 +125,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     public void Dispose()
     {
         CommandManager.RemoveHandler(CommandMain);
+        CommandManager.RemoveHandler(CommandShort);
         Framework.Update -= OnFrameworkTick;
         PluginInterface.UiBuilder.Draw -= _overlay.Draw;
         PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;

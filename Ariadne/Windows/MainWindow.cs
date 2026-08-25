@@ -198,12 +198,31 @@ internal sealed class MainWindow : Window
 
         if (ImGui.Button("Move to dest"))
             _move.MoveTo(_pathDest, _pathFly, _pathRange);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Pathfind on the ground navmesh (or volume when 'fly' is ticked) and walk it.");
+        ImGui.SameLine();
+        if (ImGui.Button("Fly to dest"))
+            _move.MoveTo(_pathDest, fly: true, _pathRange);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Volume pathfind — flying navigation through the 3D voxel volume instead of the\nground mesh. Needs a flyable zone and a mount (or diving); ignores the 'fly' tick.");
         ImGui.SameLine();
         if (ImGui.Button("Stop"))
             _move.Stop();
         ImGui.SameLine();
         if (ImGui.Button("Set dest = here") && _playerPosition() is { } here)
             _pathDest = here;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Your position.");
+        ImGui.SameLine();
+        if (ImGui.Button("Set dest = target"))
+        {
+            if (Service.TargetManager.Target is { } target)
+                _pathDest = target.Position;
+            else
+                _lastPathResult = "no target selected";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Your current game target's position.");
         ImGui.SameLine();
         if (ImGui.Button("FindPath only"))
         {

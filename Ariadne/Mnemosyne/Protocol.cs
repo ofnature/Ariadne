@@ -115,6 +115,10 @@ internal sealed class OnMeshResponse : Response
 internal sealed class BitmapResponse : Response
 {
     public string? Path { get; set; }
+    // rasterized bounds (spec'd 2026-08-25 for vnavmesh's (min,max) return shape; a server
+    // that omits them falls back to the request bounds client-side)
+    public float[]? Min { get; set; }
+    public float[]? Max { get; set; }
 }
 
 internal sealed class FindPathResponse : Response

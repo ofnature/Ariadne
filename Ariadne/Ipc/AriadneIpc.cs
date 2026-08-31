@@ -15,7 +15,7 @@ internal sealed class AriadneIpc : IDisposable
     private readonly IDalamudPluginInterface _pluginInterface;
 
     public AriadneIpc(IDalamudPluginInterface pluginInterface, MeshBroker broker, Func<string> currentCacheKey,
-        Movement.PathFollower follower, Movement.MoveRequest move)
+        Movement.PathFollower follower, Movement.MoveRequest move, Func<int> syncBudgetMs)
     {
         _pluginInterface = pluginInterface;
 
@@ -61,6 +61,12 @@ internal sealed class AriadneIpc : IDisposable
             => broker.IsPointOnMeshAsync(p, halfExtentY, allowUnreachable));
         RegisterFunc("Query.Mesh.PointOnFloor", (Vector3 p, float halfExtentXZ, bool allowUnreachable)
             => broker.PointOnFloorAsync(p, halfExtentXZ, allowUnreachable));
+        // sync-shaped like vnavmesh's (bounded wait): the flag lives in AgentMap, which only
+        // the game process can read — Ariadne resolves it and asks Mnemosyne for the floor
+        RegisterFunc("Query.Mesh.FlagToPoint", ()
+            => Zone.MapFlag.GetFlagPosition() is { } flag
+                ? SyncGate.Wait(broker.PointOnFloorAsync(new(flag.X, 1024, flag.Y), 5, false), syncBudgetMs(), (Vector3?)null)
+                : null);
 
         RegisterFunc("Nav.BuildBitmap", (List<Vector3> starts, string filename, float pixelSize)
             => broker.BuildBitmapAsync(starts, filename, pixelSize));

@@ -79,6 +79,16 @@ requests a volume path (mounted flight / diving). Paths today are plain position
 types (walk/fly/link/teleport transitions) arrive with a future protocol bump and will
 be additive.
 
+## vnavmesh compatibility mode
+
+When the real vnavmesh plugin is **not** loaded (and "Claim vnavmesh.* IPC gates" is on,
+the default), Ariadne registers the full `vnavmesh.*` surface — `Nav.*`, `Query.Mesh.*`,
+`Path.*`, `SimpleMove.*`, `Window.*`, `DTR.*` — with vnavmesh's exact shapes, so existing
+consumers work unmodified. Sync-shaped gates (`Query.Mesh.*`, bitmaps) answer via a
+bounded blocking wait (default 100 ms budget; warm answers take 1–3 ms) and return the
+not-found fallback rather than ever throwing or hanging. Checked once at plugin load: if
+vnavmesh is installed, its gates are left untouched.
+
 ## Status
 
 Movement verified in-game 2026-08-23: `SimpleMove.PathfindAndMoveTo` walked the

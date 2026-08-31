@@ -146,8 +146,16 @@ stand here instead" look identical through them. Ariadne therefore adds
 alongside the compat gates. A legacy server that omits `result` is reported as `"ok"` when
 waypoints came back and `"unreachable"` when they did not, so the field is never empty.
 
-**Multi-modal legs** (spec'd 2026-08-23 — Mnemosyne PLAN.md milestone 11; additive,
-implementation pending). Request gains `constraints?: ["noFly","noMount","noTeleport",
+**Multi-modal legs** (spec'd 2026-08-23 — Mnemosyne PLAN.md milestone 11; additive.
+**First case implemented 2026-08-25**: a fly route the volume cannot complete now lands and
+walks the remainder, answering `result: "walkedTail"` with a `fly` leg and a `walk` leg
+(`enter: "land"`). Constraints and the richer transitions are still pending.)
+
+Why it was needed: the navmesh and the voxel volume disagree at doorways. Measured at the
+Yedlihmad door — the mesh leaves it open and walks through fine, while the volume seals it,
+because the opening is narrower than a voxel leaf. It is also simply true that you cannot
+fly indoors. Before this, a fly request there returned a partial route that died 11.3 m short
+at the threshold; now it completes, ending the same 1.8 m from the goal as the walk route. Request gains `constraints?: ["noFly","noMount","noTeleport",
 "noDismount"]` (e.g. quest vehicles = `["noFly","noMount","noDismount","noTeleport"]`);
 when the server plans multi-modally it adds `legs`:
 

@@ -212,9 +212,27 @@ internal sealed class MeshBroker : IDisposable
     public async Task<string> BuildBitmapAsync(List<Vector3> startingPoints, string filename, float pixelSize,
         Vector3? minBounds = null, Vector3? maxBounds = null)
     {
+        var resp = await BuildBitmapCoreAsync(startingPoints, filename, pixelSize, minBounds, maxBounds).ConfigureAwait(false);
+        return resp is { Ok: true, Path: { } outPath } ? outPath : "";
+    }
+
+    /// <summary>vnavmesh's BuildBitmap return shape: the rasterized (min,max) bounds. Falls
+    /// back to the request bounds when the server doesn't report bounds yet.</summary>
+    public async Task<(Vector3 min, Vector3 max)> BuildBitmapBoundsAsync(List<Vector3> startingPoints, string filename, float pixelSize,
+        Vector3? minBounds = null, Vector3? maxBounds = null)
+    {
+        var resp = await BuildBitmapCoreAsync(startingPoints, filename, pixelSize, minBounds, maxBounds).ConfigureAwait(false);
+        if (resp is { Ok: true, Min: { Length: >= 3 } lo, Max: { Length: >= 3 } hi })
+            return (new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
+        return (minBounds ?? default, maxBounds ?? default);
+    }
+
+    private async Task<BitmapResponse?> BuildBitmapCoreAsync(List<Vector3> startingPoints, string filename, float pixelSize,
+        Vector3? minBounds, Vector3? maxBounds)
+    {
         var key = _currentKey;
         if (key.Length == 0 || startingPoints.Count == 0)
-            return "";
+            return null;
         var starts = new float[startingPoints.Count][];
         for (var i = 0; i < startingPoints.Count; ++i)
             starts[i] = [startingPoints[i].X, startingPoints[i].Y, startingPoints[i].Z];
@@ -222,7 +240,7 @@ internal sealed class MeshBroker : IDisposable
             minBounds is { } lo ? [lo.X, lo.Y, lo.Z] : null,
             maxBounds is { } hi ? [hi.X, hi.Y, hi.Z] : null).ConfigureAwait(false);
         Activity($"buildBitmap '{filename}': {(resp is { Ok: true } ? resp.Path : resp?.Error ?? "unavailable")}");
-        return resp is { Ok: true, Path: { } outPath } ? outPath : "";
+        return resp;
     }
 
     /// <summary>Forward execution feedback (traversal succeeded off-mesh / planned leg

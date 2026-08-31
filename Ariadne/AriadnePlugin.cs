@@ -43,6 +43,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly DtrProvider _dtr;
     private readonly WaypointOverlay _overlay;
     private readonly AriadneIpc _ipc;
+    private readonly VnavCompatIpc _vnavCompat;
     private readonly MainWindow _mainWindow;
 
     public AriadnePlugin(IDalamudPluginInterface pluginInterface)
@@ -81,7 +82,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _follower = new PathFollower(_config, _signal);
         _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position, m => Log.Information(m));
 
-        _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move);
+        _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
+            () => _config.SyncGateBudgetMs);
 
         _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
         _mainWindow = new MainWindow(
@@ -90,6 +92,9 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _windowSystem.AddWindow(_mainWindow);
 
         _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);
+
+        _vnavCompat = new VnavCompatIpc(PluginInterface, _config, SaveConfig, _broker, _follower, _move,
+            () => _mainWindow.IsOpen, v => _mainWindow.IsOpen = v, m => Log.Information(m));
 
         PluginInterface.UiBuilder.Draw += _overlay.Draw;
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
@@ -133,6 +138,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
         _windowSystem.RemoveAllWindows();
+        _vnavCompat.Dispose();
         _ipc.Dispose();
         _move.Dispose();
         _follower.Dispose(); // unhooks movement/camera

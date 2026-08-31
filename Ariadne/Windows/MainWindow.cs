@@ -386,6 +386,9 @@ internal sealed class MainWindow : Window
 
         ImGui.TextColored(Grey, "Integration");
         Toggle("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", () => _config.MirrorVnavPathIsRunning, v => _config.MirrorVnavPathIsRunning = v);
+        Toggle("Claim vnavmesh.* IPC gates when vnavmesh is absent", () => _config.EnableVnavCompat, v => _config.EnableVnavCompat = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The cutover switch: with vnavmesh uninstalled, Ariadne registers its IPC names so\nconsumers (Olympus, Theseus, …) work unmodified. Applies on plugin load/reload.");
     }
 
     private void Toggle(string label, Func<bool> get, Action<bool> set)

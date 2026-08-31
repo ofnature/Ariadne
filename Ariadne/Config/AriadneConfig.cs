@@ -41,6 +41,18 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// before giving up. Recoveries that gain ground don't count against this.</summary>
     public int StallRetries { get; set; } = 3;
 
+    // ---- vnavmesh compat ----
+
+    /// <summary>Claim the vnavmesh.* IPC gates when the real vnavmesh isn't loaded, so
+    /// existing consumers (Olympus, Theseus, …) run on Ariadne unmodified. Applies at
+    /// plugin load.</summary>
+    public bool EnableVnavCompat { get; set; } = true;
+
+    /// <summary>Budget for sync-shaped compat gates (Query.Mesh.*): how long a blocking
+    /// caller waits on the pipe before getting the not-found fallback. Warm queries answer
+    /// in 1–3 ms; this only bites when Mnemosyne is cold or away.</summary>
+    public int SyncGateBudgetMs { get; set; } = 100;
+
     // ---- UI / overlay ----
 
     /// <summary>Show the Ariadne entry in the server info bar (DTR).</summary>

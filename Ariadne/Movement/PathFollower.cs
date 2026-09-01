@@ -32,6 +32,32 @@ internal sealed class PathFollower : IDisposable
     /// re-plan with their own geometry knowledge). Reset by Move/Stop.</summary>
     public int StallCount { get; private set; }
 
+    /// <summary>Continuous direct-steer target (SteerTo) — no waypoints, no mesh, no stall
+    /// machinery; the owner re-issues per tick and Ariadne just drives the input hook.
+    /// Auto-clears on arrival. For micro-dodges when a path is overkill.</summary>
+    public Vector3? SteerTarget { get; private set; }
+    public bool IsSteering => SteerTarget != null;
+
+    /// <summary>Yalms left to travel: steer distance, or player→wp0→…→end along the path.
+    /// -1 when idle. Deadline-driven consumers (dodge vs cast timer) poll this.</summary>
+    public float RemainingDistance
+    {
+        get
+        {
+            var player = Service.ObjectTable.LocalPlayer;
+            if (player == null)
+                return -1;
+            if (SteerTarget is { } steer)
+                return (steer - player.Position).Length();
+            if (_waypoints.Count == 0)
+                return -1;
+            var total = (_waypoints[0] - player.Position).Length();
+            for (var i = 1; i < _waypoints.Count; i++)
+                total += (_waypoints[i] - _waypoints[i - 1]).Length();
+            return total;
+        }
+    }
+
     /// <summary>Raised on the framework thread when no progress is made for the configured
     /// window while a path is active. Args: final destination, fly, destination tolerance.
     /// The follower keeps going unless the handler calls Stop().</summary>
@@ -75,15 +101,30 @@ internal sealed class PathFollower : IDisposable
         DestinationTolerance = destinationTolerance;
         IsExternalPath = external;
         _pathTolerance = waypointTolerance; // per-path override; null = the global setting
+        SteerTarget = null;
         StallCount = 0;
         _stall.Reset();
         _progress.Reset();
         _signal.Set(_waypoints.Count > 0);
     }
 
+    /// <summary>Steer straight at a point through the input hook — no path, no mesh. The
+    /// PathIsRunning flag is set (steering IS the movement handover); arrival auto-stops.</summary>
+    public void SteerTo(Vector3 target)
+    {
+        _waypoints.Clear();
+        IsExternalPath = true;
+        SteerTarget = target;
+        StallCount = 0;
+        _stall.Reset();
+        _progress.Reset();
+        _signal.Set(true);
+    }
+
     public void Stop()
     {
         _waypoints.Clear();
+        SteerTarget = null;
         IsExternalPath = false;
         _pathTolerance = null;
         StallCount = 0;
@@ -97,6 +138,23 @@ internal sealed class PathFollower : IDisposable
         var player = Service.ObjectTable.LocalPlayer;
         if (player == null)
             return;
+
+        if (_waypoints.Count == 0 && SteerTarget is { } steer)
+        {
+            var toTarget = steer - player.Position;
+            toTarget.Y = 0; // walk steering: the input pair is horizontal
+            if (toTarget.Length() <= 0.5f)
+            {
+                Stop(); // arrived — release the hook and the shared flag
+                _posPreviousFrame = player.Position;
+                return;
+            }
+            _posPreviousFrame = player.Position;
+            OverrideAFK.ResetTimers();
+            _movement.Enabled = MovementAllowed;
+            _movement.DesiredPosition = steer;
+            return;
+        }
 
         PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, _pathTolerance ?? Tolerance, DestinationTolerance, IgnoreDeltaY);
 

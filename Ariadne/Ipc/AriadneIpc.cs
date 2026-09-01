@@ -86,6 +86,13 @@ internal sealed class AriadneIpc : IDisposable
         // stalls on externally-supplied paths are the OWNER's to handle (Ariadne won't mesh
         // re-path over your waypoints) — poll this; a rise on your path means re-plan
         RegisterFunc("Path.StallCount", () => follower.StallCount);
+        // continuous direct steering (Minerva): no waypoints/mesh/stall machinery — Ariadne
+        // just drives its input hook at the point; re-issue per tick, auto-stops on arrival
+        RegisterAction("Path.SteerTo", (Vector3 dest) => follower.SteerTo(dest));
+        RegisterFunc("Path.IsSteering", () => follower.IsSteering);
+        // yalms left (steer distance, or along the remaining path); -1 idle — for
+        // deadline-driven consumers deciding dodge vs cast timer
+        RegisterFunc("Path.RemainingDistance", () => follower.RemainingDistance);
         RegisterAction("Path.Stop", move.Stop);
         RegisterFunc("Path.IsRunning", () => follower.IsRunning);
         RegisterFunc("Path.NumWaypoints", () => follower.Waypoints.Count);

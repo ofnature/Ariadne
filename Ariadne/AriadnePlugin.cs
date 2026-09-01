@@ -45,6 +45,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly AriadneIpc _ipc;
     private readonly VnavCompatIpc _vnavCompat;
     private readonly MainWindow _mainWindow;
+    private readonly bool[] _navReadyShared;
 
     public AriadnePlugin(IDalamudPluginInterface pluginInterface)
     {
@@ -96,6 +97,10 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _vnavCompat = new VnavCompatIpc(PluginInterface, _config, SaveConfig, _broker, _follower, _move,
             () => _mainWindow.IsOpen, v => _mainWindow.IsOpen = v, m => Log.Information(m));
 
+        // exception-free readiness for per-frame consumers (Minerva probes once a second and
+        // eats a try/catch because gate calls throw when a plugin is absent; shared data doesn't)
+        _navReadyShared = PluginInterface.GetOrCreateData<bool[]>("ariadne.NavReady", () => [false]);
+
         PluginInterface.UiBuilder.Draw += _overlay.Draw;
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
@@ -143,6 +148,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _move.Dispose();
         _follower.Dispose(); // unhooks movement/camera
         _signal.Dispose();   // clears + relinquishes shared-data flags
+        _navReadyShared[0] = false;
+        PluginInterface.RelinquishData("ariadne.NavReady");
         _zoneWatcher.Dispose();
         _broker.Dispose(); // disposes the pipe client
     }
@@ -154,6 +161,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _follower.Update(fwk);
         _move.Update();
         _dtr.Update();
+        _navReadyShared[0] = _broker.MnemosyneConnected && _broker.NavIsReady;
     }
 
     // Runs on the framework thread (safe to touch game state); null while loading or logged out.

@@ -41,6 +41,13 @@ Ariadne only steers while the player isn't pressing anything (vnavmesh semantics
 | `Ariadne.Path.MoveTo` | `(List<Vector3> waypoints, bool fly)` action | follow a precomputed path — **your path is yours**: Ariadne never mesh-re-paths waypoints you supplied (see stall note below) |
 | `Ariadne.Path.MoveToWithTolerance` | `(List<Vector3> waypoints, bool fly, float tolerance)` action | same, with per-path waypoint tolerance (global `SetTolerance` untouched) |
 | `Ariadne.Path.StallCount` | `() → int` | stalls detected on the current path (reset each Move/Stop); a rise on your supplied path = re-plan it yourself |
+| `Ariadne.Path.SteerTo` | `(Vector3 dest)` action | continuous direct steer through the input hook — no waypoints/mesh/stall machinery; re-issue per tick; auto-stops ≤0.5y; sets the PathIsRunning flag |
+| `Ariadne.Path.IsSteering` | `() → bool` | |
+| `Ariadne.Path.RemainingDistance` | `() → float` | yalms left (steer or along path), -1 idle — deadline arithmetic for dodges |
+
+**Readiness without exceptions:** shared data `ariadne.NavReady` (`bool[]`, same pattern
+as the PathIsRunning flag) mirrors `IsConnected && ZoneStatus is 2 or 3` every frame —
+poll it instead of try/catching gate calls.
 | `Ariadne.Path.Stop` | action | drops path and any pending pathfind |
 | `Ariadne.Path.IsRunning` | `() → bool` | same truth as the shared-data flag |
 | `Ariadne.Path.NumWaypoints` | `() → int` | remaining |

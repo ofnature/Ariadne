@@ -22,6 +22,16 @@ internal sealed class PathFollower : IDisposable
     public bool IgnoreDeltaY { get; private set; }
     public float DestinationTolerance { get; private set; }
 
+    /// <summary>True when the active path was supplied by an external caller (Path.MoveTo)
+    /// rather than MoveRequest. Stall recovery must not touch external paths: their
+    /// waypoints may encode knowledge the mesh doesn't have (Minerva's danger-aware dodge
+    /// corners), and a mesh re-path would discard exactly that (docs/externally-supplied-paths.md).</summary>
+    public bool IsExternalPath { get; private set; }
+
+    /// <summary>Stalls detected on the current path (external callers poll this over IPC to
+    /// re-plan with their own geometry knowledge). Reset by Move/Stop.</summary>
+    public int StallCount { get; private set; }
+
     /// <summary>Raised on the framework thread when no progress is made for the configured
     /// window while a path is active. Args: final destination, fly, destination tolerance.
     /// The follower keeps going unless the handler calls Stop().</summary>
@@ -37,6 +47,7 @@ internal sealed class PathFollower : IDisposable
 
     private Vector3? _posPreviousFrame;
     private DateTime _nextJump;
+    private float? _pathTolerance;
 
     public PathFollower(AriadneConfig config, PathIsRunningSignal signal)
     {
@@ -53,12 +64,18 @@ internal sealed class PathFollower : IDisposable
         _movement.Dispose();
     }
 
-    public void Move(List<Vector3> waypoints, bool fly, float destinationTolerance = 0)
+    // external defaults to true: any caller that doesn't explicitly claim ownership
+    // (only MoveRequest does) is treated as supplying its own waypoints
+    public void Move(List<Vector3> waypoints, bool fly, float destinationTolerance = 0,
+        bool external = true, float? waypointTolerance = null)
     {
         _waypoints.Clear();
         _waypoints.AddRange(waypoints);
         IgnoreDeltaY = !fly;
         DestinationTolerance = destinationTolerance;
+        IsExternalPath = external;
+        _pathTolerance = waypointTolerance; // per-path override; null = the global setting
+        StallCount = 0;
         _stall.Reset();
         _progress.Reset();
         _signal.Set(_waypoints.Count > 0);
@@ -67,6 +84,9 @@ internal sealed class PathFollower : IDisposable
     public void Stop()
     {
         _waypoints.Clear();
+        IsExternalPath = false;
+        _pathTolerance = null;
+        StallCount = 0;
         _stall.Reset();
         _progress.Reset();
         _signal.Set(false);
@@ -78,7 +98,7 @@ internal sealed class PathFollower : IDisposable
         if (player == null)
             return;
 
-        PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, Tolerance, DestinationTolerance, IgnoreDeltaY);
+        PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, _pathTolerance ?? Tolerance, DestinationTolerance, IgnoreDeltaY);
 
         if (_waypoints.Count == 0)
         {
@@ -105,6 +125,7 @@ internal sealed class PathFollower : IDisposable
             stalled |= _progress.Update((destination - player.Position).Length(), deltaMs);
             if (stalled)
             {
+                StallCount++;
                 OnStalled?.Invoke(destination, !IgnoreDeltaY, DestinationTolerance);
                 if (_waypoints.Count == 0)
                     return; // handler stopped us

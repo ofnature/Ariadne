@@ -356,6 +356,12 @@ One Mnemosyne service serves every Ariadne on the machine. Rules:
   `contentId` — this Dalamud API version exposes no local content id, and a bare character
   name is not unique across worlds. Treat `character` as the human-facing label and the
   connection as the identity; `contentId` stays in the spec for a client that has one.
+- **Zone edits are shared, and hot.** Overrides, obstacles and prunes are stored per *zone*
+  (`%APPDATA%\Mnemosyne\overrides\<bg-key>.json`), never per character, so an edit made while
+  playing one toon is the same data every other client reads. Since 2026-08-25 the server also
+  notices the file changing under a zone it already has loaded and reloads it, so an edit
+  reaches every client on its next query — no restart, no zone re-entry. Consumers need do
+  nothing; a route simply changes.
 - **Per-client state, not global.** Anything that used to be a single latest value is
   now keyed by connection: pushed game state, `pathfindInProgress`, `pathfindNumQueued`.
   A client only ever sees its own counters, matching vnavmesh's per-process semantics.

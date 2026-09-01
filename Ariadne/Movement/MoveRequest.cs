@@ -61,7 +61,7 @@ internal sealed class MoveRequest : IDisposable
         }
 
         LastResult = $"{path.Count} waypoints";
-        _follower.Move(path, _pendingFly, _pendingRange);
+        _follower.Move(path, _pendingFly, _pendingRange, external: false); // ours: stall recovery may re-path it
     }
 
     public bool MoveTo(Vector3 dest, bool fly, float range = 0)
@@ -107,6 +107,13 @@ internal sealed class MoveRequest : IDisposable
 
     private void OnStalled(Vector3 destination, bool fly, float range)
     {
+        // Externally-supplied paths (Path.MoveTo) are not ours to recover: their waypoints
+        // may encode knowledge the mesh lacks — Minerva's dodge corners bend around AOEs a
+        // mesh re-path would walk straight through. Leave the path running; the owner polls
+        // Path.StallCount and re-plans with the geometry knowledge it actually has.
+        if (_follower.IsExternalPath)
+            return;
+
         // Attempts are budgeted by ground gained, not by count: a re-path that closed
         // ProgressMinGain since the last one clears the futility count (Odysseus's rule —
         // progress buys the clock back). Only consecutive futile recoveries give up.

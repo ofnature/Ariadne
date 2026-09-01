@@ -103,7 +103,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open the Ariadne status window.",
+            HelpMessage = "Open the Ariadne status window. '/ariadne capture' rebuilds this zone from the live layout.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -170,7 +170,19 @@ public sealed class AriadnePlugin : IDalamudPlugin
             $"{player.Name.TextValue}@{player.HomeWorld.Value.Name}");
     }
 
-    private void OnCommand(string command, string args) => OpenMain();
+    private void OnCommand(string command, string args)
+    {
+        // "/ariadne capture" ships the live layout to Mnemosyne and rebuilds this zone even
+        // when a mesh already exists - the only way to capture a festival or shared-group
+        // variant, since the automatic path only fires on a cache miss.
+        if (args.Trim().Equals("capture", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = _broker.CaptureCurrentZoneAsync();
+            Log.Information("[Ariadne] capture requested for the current zone");
+            return;
+        }
+        OpenMain();
+    }
 
     private void OpenMain() => _mainWindow.IsOpen = true;
 

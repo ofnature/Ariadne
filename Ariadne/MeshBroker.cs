@@ -297,6 +297,27 @@ internal sealed class MeshBroker : IDisposable
     // the game process sees active festival layers / SG states / live instances) and let
     // Mnemosyne build the exact variant out of process. vnavmesh may be building in-game
     // at the same time — whoever finishes first wins, the other becomes the cache.
+    /// <summary>Capture the live scene and rebuild this zone even though a mesh already
+    /// exists. The automatic path only fires on a cache miss, which means a zone vnavmesh has
+    /// cached can never be captured - and the cached copy may be the wrong variant. Festival
+    /// layers and shared-group states only exist in the game process, so this is the only way
+    /// to get the exact variant a player is standing in. Deliberate, so it also clears the
+    /// once-per-session guard.</summary>
+    public async Task<bool> CaptureCurrentZoneAsync()
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+        {
+            Activity("capture rejected: zone not ready");
+            return false;
+        }
+        lock (_activityLock)
+            _buildRequested.Remove(key); // an explicit ask overrides "already asked this session"
+        Activity($"capturing '{key}' on request");
+        await RequestBuildAsync(key).ConfigureAwait(false);
+        return true;
+    }
+
     private async Task RequestBuildAsync(string cacheKey)
     {
         lock (_activityLock)
@@ -373,8 +394,18 @@ internal sealed class MeshBroker : IDisposable
             return _seeder.LocalStatus(cacheKey) == LocalMeshStatus.Current;
         }
 
+        // Warn before seeding, not after: vnavmesh silently rejects a file whose customization
+        // version is not the one it expects, so a mismatch means this copy is about to
+        // accomplish nothing at all. Not fatal - the seed still goes ahead, since our version
+        // may be the newer one and vnavmesh may be the thing that is behind.
+        var compatibility = _seeder.CheckCustomization(cacheKey, sourcePath, out var ours, out var theirs);
+        if (compatibility == SeedCompatibility.Differs)
+            Activity($"WARNING customization drift: seeding v{ours} where vnavmesh built v{theirs}. "
+                + "vnavmesh will reject this file and rebuild. Re-vendor the customizations.");
+
         var result = _seeder.Seed(cacheKey, sourcePath);
-        Activity($"seed '{cacheKey}': {result} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
+        Activity($"seed '{cacheKey}': {result} ({sw.Elapsed.TotalMilliseconds:0.0}ms"
+            + (compatibility == SeedCompatibility.Matches ? $", customization v{ours}" : "") + ")");
 
         if (result == SeedResult.Seeded)
         {

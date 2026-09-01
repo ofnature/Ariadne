@@ -24,6 +24,9 @@ internal sealed class AriadneIpc : IDisposable
         RegisterFunc("ZoneStatus", () => (int)broker.Current.Status);
         RegisterFunc("RequestMesh", broker.RequestMeshAsync);
         RegisterFunc("SeedVnavCache", broker.SeedVnavCacheAsync);
+        // capture the live layout and rebuild, even when a mesh is already cached - the only
+        // route to a festival or shared-group variant
+        RegisterFunc("CaptureZone", broker.CaptureCurrentZoneAsync);
         RegisterFunc("FindPath", (Vector3 from, Vector3 to, bool fly) => broker.FindPathAsync(from, to, fly));
         // feedback channel (Odysseus §2): report a traversal that succeeded where the mesh
         // said no ("direct"), or a planned leg that failed — becomes override evidence
@@ -76,6 +79,13 @@ internal sealed class AriadneIpc : IDisposable
 
         // movement — same shapes as vnavmesh's Path.* / SimpleMove.* so a compat alias layer is trivial later
         RegisterAction("Path.MoveTo", (List<Vector3> waypoints, bool fly) => follower.Move(waypoints, fly));
+        // per-call waypoint tolerance (Minerva request): tighter dodge-corner arrival without
+        // stomping the user's global Path.SetTolerance
+        RegisterAction("Path.MoveToWithTolerance", (List<Vector3> waypoints, bool fly, float tolerance)
+            => follower.Move(waypoints, fly, waypointTolerance: tolerance));
+        // stalls on externally-supplied paths are the OWNER's to handle (Ariadne won't mesh
+        // re-path over your waypoints) — poll this; a rise on your path means re-plan
+        RegisterFunc("Path.StallCount", () => follower.StallCount);
         RegisterAction("Path.Stop", move.Stop);
         RegisterFunc("Path.IsRunning", () => follower.IsRunning);
         RegisterFunc("Path.NumWaypoints", () => follower.Waypoints.Count);
@@ -146,6 +156,13 @@ internal sealed class AriadneIpc : IDisposable
     private void RegisterAction<T1, T2>(string name, Action<T1, T2> func)
     {
         var p = _pluginInterface.GetIpcProvider<T1, T2, object>("Ariadne." + name);
+        p.RegisterAction(func);
+        _disposeActions.Add(p.UnregisterAction);
+    }
+
+    private void RegisterAction<T1, T2, T3>(string name, Action<T1, T2, T3> func)
+    {
+        var p = _pluginInterface.GetIpcProvider<T1, T2, T3, object>("Ariadne." + name);
         p.RegisterAction(func);
         _disposeActions.Add(p.UnregisterAction);
     }

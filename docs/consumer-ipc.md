@@ -38,7 +38,9 @@ Ariadne only steers while the player isn't pressing anything (vnavmesh semantics
 
 | Gate | Signature | Notes |
 |---|---|---|
-| `Ariadne.Path.MoveTo` | `(List<Vector3> waypoints, bool fly)` action | follow a precomputed path |
+| `Ariadne.Path.MoveTo` | `(List<Vector3> waypoints, bool fly)` action | follow a precomputed path — **your path is yours**: Ariadne never mesh-re-paths waypoints you supplied (see stall note below) |
+| `Ariadne.Path.MoveToWithTolerance` | `(List<Vector3> waypoints, bool fly, float tolerance)` action | same, with per-path waypoint tolerance (global `SetTolerance` untouched) |
+| `Ariadne.Path.StallCount` | `() → int` | stalls detected on the current path (reset each Move/Stop); a rise on your supplied path = re-plan it yourself |
 | `Ariadne.Path.Stop` | action | drops path and any pending pathfind |
 | `Ariadne.Path.IsRunning` | `() → bool` | same truth as the shared-data flag |
 | `Ariadne.Path.NumWaypoints` | `() → int` | remaining |
@@ -55,6 +57,12 @@ current position; attempts are budgeted by ground gained, not by count — a rec
 closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. A consumer
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
+
+**Recovery applies only to paths Ariadne computed itself** (`SimpleMove.*`). A path you
+supplied via `Path.MoveTo` is never mesh-re-pathed — your waypoints may encode knowledge
+the mesh lacks (danger-aware dodge corners), so on a stall Ariadne keeps following them
+and increments `Path.StallCount`; re-planning is the owner's job
+(`docs/externally-supplied-paths.md` has the full rationale).
 
 ## Pathfinding / mesh gates
 

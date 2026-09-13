@@ -74,7 +74,7 @@ all are open, and the piece to take is a design.
 | 2 | Aetherytes shorten distance | Not started (planner has teleport legs on paper; Odysseus runs a placeholder rule) | **Typed movements with costs** (Baritone) — teleport as a movement; **teleporter reachabilities + route cache** (AAS); **Lifestream as executor** | plan: Mnemosyne · execute: Ariadne |
 | 3 | Fly mid-air | SVO/Theta\* landed (near-straight in open sky); near terrain the volume weaves and ground often wins on ETA | **Clearance-gradient altitude preference + B-spline smoothing** (EGO/Fast-Planner); **topological alternatives** (over vs around) | Mnemosyne |
 | 4 | Never caught in geometry | Stall recovery (progress budgets, futility counters) landed, unit-tested, not wedge-proven; per-leg through-solid validation open | **Chaikin / Catmull-Rom smoothing** (Ameisen) so corners aren't scraped; **prebuild every zone** (Namigator/Trinity) so nobody navigates on a half-built mesh; `reportTraversal` evidence feeding obstacle vetting | Mnemosyne; Ariadne keeps the executor |
-| 5 | Doors | Mesh-side only (corrected 2026-09-12: FFXIV doors auto-open, so there is no runtime rule to port). Mnemosyne's `doors` sweep already finds baked-closed doors (Ul'dah `sgbg_w1t0_a0_door2`); its known gap is "doors bake as authored" | **Treat door-class layout objects as passable at build** (drop the collider or force a walkable area, the way vnavmesh's customizations resize colliders); the `doors` sweep as the regression check; off-mesh link through the opening as the fallback edit | Mnemosyne |
+| 5 | Doors | Mesh-side only (corrected 2026-09-12: FFXIV doors auto-open, so there is no runtime rule to port). Mnemosyne's `doors` sweep already finds baked-closed doors (Ul'dah `sgbg_w1t0_a0_door2`); its known gap is "doors bake as authored" | **Doors as known, passable objects with a link through the opening** (user's direction): auto-listed door objects each get an off-mesh connection on the walk mesh *and* the same edge known to the volume, so a fly route can reach the door and continue as a walk leg through it; the `doors` sweep as the regression check; carving the collider out at build is the fallback | Mnemosyne (link data + both planners); Ariadne executes the leg boundary |
 
 Cross-cutting: **goal types** on the consumer surface (`GoalNear` = `MoveCloseTo` today;
 add interact-range and run-away goals) — Ariadne; **community mesh distribution** with an
@@ -82,9 +82,10 @@ updater (MQ2Nav MeshUpdater / RB model) — the deferred tier, now with preceden
 
 ## 5. Suggested order for the later project
 
-1. **Doors passable at build** (Mnemosyne, small — door colliders are the whole failure;
-   doors auto-open in-game) and **teleport-leg execution via Lifestream** (Ariadne, small,
-   works before the planner emits legs, using a local rule).
+1. **Door links** (Mnemosyne — auto-listed doors become links known to both the mesh and
+   the volume; doors auto-open in-game so nothing else is needed) and **teleport-leg
+   execution via Lifestream** (Ariadne, small, works before the planner emits legs, using
+   a local rule).
 2. **Movement-type planner model** (Mnemosyne) — refactor 11a's legs into Baritone-style
    typed movements + goal predicates; teleport, mount, door become entries, not cases.
 3. **Costmap layers** (Mnemosyne) — unify padding, obstacles, cost paint, danger.

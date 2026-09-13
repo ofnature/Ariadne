@@ -94,6 +94,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => ClientState.TerritoryType,
             () => Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.InCombat]
                 || Condition[ConditionFlag.RidingPillion] || Condition[ConditionFlag.BetweenAreas],
+            () => Condition[ConditionFlag.Casting] || Condition[ConditionFlag.BetweenAreas]
+                || Condition[ConditionFlag.BetweenAreas51],
             () =>
             {
                 var ids = new List<uint>();

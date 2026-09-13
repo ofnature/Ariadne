@@ -16,14 +16,19 @@ internal sealed class TeleportService
     private readonly AriadneConfig _config;
     private readonly Func<uint> _territory;
     private readonly Func<bool> _blocked;
+    private readonly Func<bool> _inTransit;
     private readonly Func<IReadOnlyCollection<uint>> _attunedIds;
 
     /// <param name="blocked">Teleporting is impossible or unwanted right now: in a duty, in
     /// combat, on a quest vehicle, between areas.</param>
+    /// <param name="inTransit">The game says a teleport is under way: casting, or between
+    /// areas. Lifestream's own busy flag covers only its queue — it hands the cast to the game
+    /// and reports idle while the cast runs (found in the field 2026-09-13).</param>
     /// <param name="attunedIds">The character's attuned aetheryte ids, read live.</param>
     public TeleportService(LifestreamIpc lifestream, AetheryteCatalog catalog, AriadneConfig config,
-        Func<uint> territory, Func<bool> blocked, Func<IReadOnlyCollection<uint>> attunedIds)
+        Func<uint> territory, Func<bool> blocked, Func<bool> inTransit, Func<IReadOnlyCollection<uint>> attunedIds)
     {
+        _inTransit = inTransit;
         _lifestream = lifestream;
         _catalog = catalog;
         _config = config;
@@ -98,6 +103,7 @@ internal sealed class TeleportService
     }
 
     public bool Start(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
-    public bool Busy => _lifestream.IsBusy;
+    /// <summary>A teleport is in progress: Lifestream working the queue, or the game casting / loading.</summary>
+    public bool Busy => _lifestream.IsBusy || _inTransit();
     public void Abort() => _lifestream.Abort();
 }

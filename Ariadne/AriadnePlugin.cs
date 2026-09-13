@@ -59,7 +59,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         var client = new MnemosyneClient(m => Log.Information(m), m => Log.Warning(m),
             serviceExePath: () => _config.AutoStartMnemosyne ? _config.MnemosyneServicePath : null);
-        var vnav = new VnavIpc(PluginInterface, m => Log.Information(m));
+        // _vnavCompat is assigned below; the lambda only runs on ticks, after the constructor
+        var vnav = new VnavIpc(PluginInterface, () => _vnavCompat?.Owned == true, m => Log.Information(m));
         _broker = new MeshBroker(client, new CacheSeeder(vnavCacheDir), vnav,
             () => _config.AutoSeed, () => _config.BuildOnMiss,
             cacheKey => Framework.RunOnFrameworkThread(() =>
@@ -86,16 +87,18 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
             () => _config.SyncGateBudgetMs);
 
+        // Registers nothing until its first Tick, so the window lambdas never run before
+        // _mainWindow is assigned.
+        _vnavCompat = new VnavCompatIpc(PluginInterface, _config, SaveConfig, _broker, _follower, _move,
+            () => _mainWindow!.IsOpen, v => _mainWindow!.IsOpen = v, m => Log.Information(m));
+
         _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay,
+            _config, SaveConfig, _broker, vnav, _vnavCompat, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
         _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);
-
-        _vnavCompat = new VnavCompatIpc(PluginInterface, _config, SaveConfig, _broker, _follower, _move,
-            () => _mainWindow.IsOpen, v => _mainWindow.IsOpen = v, m => Log.Information(m));
 
         // exception-free readiness for per-frame consumers (Minerva probes once a second and
         // eats a try/catch because gate calls throw when a plugin is absent; shared data doesn't)
@@ -157,6 +160,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework fwk)
     {
         _tracker.Tick();
+        _vnavCompat.Tick();
         _pusher.Tick();
         _follower.Update(fwk);
         _move.Update();

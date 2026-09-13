@@ -7,11 +7,14 @@ namespace Ariadne.Ipc;
 /// <summary>
 /// vnavmesh, wrapped. Every call fails open — a missing vnavmesh degrades Ariadne to a pure
 /// Mnemosyne front-end (its own IPC consumers still work), reported once rather than
-/// throwing on every zone change.
+/// throwing on every zone change. While Ariadne's compat layer holds the vnavmesh.* names
+/// these gates would answer with Ariadne's own state, so vnavmesh is reported absent
+/// instead of talked to through ourselves.
 /// </summary>
 internal sealed class VnavIpc
 {
     private readonly IDalamudPluginInterface _pluginInterface;
+    private readonly Func<bool> _compatOwnsGates;
     private readonly Action<string>? _log;
 
     private ICallGateSubscriber<bool>? _isReady;
@@ -20,9 +23,10 @@ internal sealed class VnavIpc
 
     private bool _warned;
 
-    public VnavIpc(IDalamudPluginInterface pluginInterface, Action<string>? log = null)
+    public VnavIpc(IDalamudPluginInterface pluginInterface, Func<bool> compatOwnsGates, Action<string>? log = null)
     {
         _pluginInterface = pluginInterface;
+        _compatOwnsGates = compatOwnsGates;
         _log = log;
     }
 
@@ -31,6 +35,8 @@ internal sealed class VnavIpc
     {
         get
         {
+            if (_compatOwnsGates())
+                return false;
             try
             {
                 (_isReady ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Nav.IsReady")).InvokeFunc();
@@ -55,6 +61,8 @@ internal sealed class VnavIpc
     {
         get
         {
+            if (_compatOwnsGates())
+                return -1;
             try
             {
                 return (_buildProgress ??= _pluginInterface.GetIpcSubscriber<float>("vnavmesh.Nav.BuildProgress")).InvokeFunc();
@@ -74,6 +82,8 @@ internal sealed class VnavIpc
 
     private bool Try(Func<bool> call)
     {
+        if (_compatOwnsGates())
+            return false;
         try
         {
             var result = call();

@@ -34,6 +34,7 @@ internal sealed class MainWindow : Window
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
+    private readonly VnavCompatIpc _compat;
     private bool _pathFly;
     private float _pathRange;
     private string _lastPathResult = "";
@@ -52,6 +53,7 @@ internal sealed class MainWindow : Window
         Func<Vector3?> playerPosition)
         : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
+        VnavCompatIpc compat,
         _overlay = overlay;
         _config = config;
         _saveConfig = saveConfig;
@@ -66,6 +68,7 @@ internal sealed class MainWindow : Window
 
         Size = new Vector2(560, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
+        _compat = compat;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(420, 320),
@@ -143,7 +146,15 @@ internal sealed class MainWindow : Window
     {
         ImGui.TextUnformatted("vnavmesh");
         ImGui.SameLine();
-        if (!_vnav.IsAvailable)
+        if (_compat.Owned)
+        {
+            // its own status is unreadable now: the vnavmesh.* gates answer with Ariadne's state
+            if (_compat.VnavmeshLoaded)
+                ImGui.TextColored(Yellow, "loaded — vnavmesh.* gates taken over, consumers move through Ariadne");
+            else
+                ImGui.TextColored(Green, "not loaded — vnavmesh.* gates served by Ariadne");
+        }
+        else if (!_vnav.IsAvailable)
         {
             ImGui.TextColored(Grey, "not loaded");
         }
@@ -388,7 +399,38 @@ internal sealed class MainWindow : Window
         Toggle("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", () => _config.MirrorVnavPathIsRunning, v => _config.MirrorVnavPathIsRunning = v);
         Toggle("Claim vnavmesh.* IPC gates when vnavmesh is absent", () => _config.EnableVnavCompat, v => _config.EnableVnavCompat = v);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("The cutover switch: with vnavmesh uninstalled, Ariadne registers its IPC names so\nconsumers (Olympus, Theseus, …) work unmodified. Applies on plugin load/reload.");
+            ImGui.SetTooltip("The cutover switch: with vnavmesh uninstalled, Ariadne registers its IPC names so\nconsumers (Olympus, Theseus, …) work unmodified. Re-checked every couple of seconds:\nif vnavmesh loads later it takes its names back, if it unloads Ariadne reclaims them.");
+        if (_config.EnableVnavCompat)
+        {
+            ImGui.Indent();
+            Toggle("Take over the gates even while vnavmesh is loaded (Ariadne does the moving)", () => _config.VnavCompatTakeover, v => _config.VnavCompatTakeover = v);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Ariadne registers over vnavmesh's IPC names, so consumers path and move through Ariadne\nwhile vnavmesh stays installed for its viewer, in-game builds and the seeded cache.\nvnavmesh's own status is unreadable meanwhile. Turning this off (or unloading Ariadne)\nempties the names — reload vnavmesh to give it its own back.");
+            ImGui.Unindent();
+        }
+    }
+
+    /// <summary>Show what autostart would use, and whether it is even needed. Resolving is a
+    /// pair of file reads and starts nothing — the only code that launches is TryLaunch, and
+    /// it runs from the connect path, only when the pipe is absent.</summary>
+    private void DrawServiceResolution()
+    {
+        if (DateTime.UtcNow - _serviceProbedAt > TimeSpan.FromSeconds(1))
+        {
+            _serviceProbedAt = DateTime.UtcNow;
+            _serviceExe = ServiceLauncher.ResolveExe(_config.MnemosyneServicePath, out _serviceWhyNot);
+            _servicePipeUp = File.Exists($@"\\.\pipe\{Protocol.PipeName}");
+        }
+
+        if (_servicePipeUp)
+            ImGui.TextColored(Green, "running — autostart idle");
+        else if (_serviceExe != null)
+            ImGui.TextColored(Yellow, "not running — would start it");
+        else
+            ImGui.TextColored(Red, "not running — cannot start it");
+
+        ImGui.SameLine();
+        ImGui.TextColored(Grey, _serviceExe ?? _serviceWhyNot);
     }
 
     private void Toggle(string label, Func<bool> get, Action<bool> set)

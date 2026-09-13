@@ -96,13 +96,30 @@ be additive.
 
 ## vnavmesh compatibility mode
 
-When the real vnavmesh plugin is **not** loaded (and "Claim vnavmesh.* IPC gates" is on,
-the default), Ariadne registers the full `vnavmesh.*` surface — `Nav.*`, `Query.Mesh.*`,
-`Path.*`, `SimpleMove.*`, `Window.*`, `DTR.*` — with vnavmesh's exact shapes, so existing
-consumers work unmodified. Sync-shaped gates (`Query.Mesh.*`, bitmaps) answer via a
-bounded blocking wait (default 100 ms budget; warm answers take 1–3 ms) and return the
-not-found fallback rather than ever throwing or hanging. Checked once at plugin load: if
-vnavmesh is installed, its gates are left untouched.
+Dalamud IPC names are one global slot each: the last plugin to register wins, and
+unregistering empties the slot whoever filled it. Ariadne therefore manages the
+`vnavmesh.*` names by policy, re-checked every ~2 s (plugin list + an ownership probe),
+in two modes:
+
+- **Claim when absent** (default on): with vnavmesh not loaded, Ariadne registers the
+  full `vnavmesh.*` surface — `Nav.*`, `Query.Mesh.*`, `Path.*`, `SimpleMove.*`,
+  `Window.*`, `DTR.*` — with vnavmesh's exact shapes, so existing consumers work
+  unmodified. If vnavmesh loads later it takes its names back (its registration
+  overwrites Ariadne's) and Ariadne steps aside; if it unloads, Ariadne reclaims them.
+- **Take over while loaded** (config, default off): Ariadne registers over vnavmesh's own
+  names, so consumers path and move through Ariadne — Mnemosyne paths, Ariadne's follower
+  with stall recovery — while vnavmesh stays installed for its viewer, its in-game builds
+  and the seeded cache. vnavmesh's own status is unreadable through IPC in this mode (the
+  gates answer with Ariadne's state), so the reload nudge and the vnavmesh timings are
+  off. Caveat: vnavmesh writes `vnav.PathIsRunning` false on every idle frame into the
+  same shared array, so that mirror is unreliable while vnavmesh is loaded — read
+  `ariadne.PathIsRunning` instead.
+
+Releasing the names (takeover switched off, compat disabled, or Ariadne unloading)
+empties them; vnavmesh registers only at load, so reload it to restore its own set.
+Sync-shaped gates (`Query.Mesh.*`, bitmaps) answer via a bounded blocking wait (default
+100 ms budget; warm answers take 1–3 ms) and return the not-found fallback rather than
+ever throwing or hanging.
 
 ## Status
 

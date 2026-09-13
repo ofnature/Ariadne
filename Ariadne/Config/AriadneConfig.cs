@@ -48,6 +48,13 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// plugin load.</summary>
     public bool EnableVnavCompat { get; set; } = true;
 
+    /// <summary>Claim the vnavmesh.* gates even while the real vnavmesh is loaded — Ariadne
+    /// registers over its names, so consumers path and move through Ariadne while vnavmesh
+    /// stays installed for its viewer, in-game builds, and the seeded cache. Requires
+    /// EnableVnavCompat. Re-applied every couple of seconds; vnavmesh's own IPC status is
+    /// unreadable while this is on (the gates answer with Ariadne's state).</summary>
+    public bool VnavCompatTakeover { get; set; }
+
     /// <summary>Budget for sync-shaped compat gates (Query.Mesh.*): how long a blocking
     /// caller waits on the pipe before getting the not-found fallback. Warm queries answer
     /// in 1–3 ms; this only bites when Mnemosyne is cold or away.</summary>

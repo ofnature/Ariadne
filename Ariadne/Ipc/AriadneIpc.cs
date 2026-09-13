@@ -103,6 +103,17 @@ internal sealed class AriadneIpc : IDisposable
         RegisterFunc("SimpleMove.PathfindAndMoveTo", (Vector3 dest, bool fly) => move.MoveTo(dest, fly));
         RegisterFunc("SimpleMove.PathfindAndMoveCloseTo", (Vector3 dest, bool fly, float range) => move.MoveTo(dest, fly, range));
         RegisterFunc("SimpleMove.PathfindInProgress", () => move.TaskInProgress);
+        // ---- goal types (Baritone-style; MoveCloseTo above is GoalNear) ----
+        // interact: path to a live object and stop inside interact range (config + its hitbox);
+        // follows it if it wanders, keeps the last known spot if it despawns
+        RegisterFunc("SimpleMove.PathfindAndMoveToInteract", (ulong gameObjectId, bool fly) => move.MoveToInteract(gameObjectId, fly));
+        // away: end up at least `distance` from a point, at a reachable mesh spot Ariadne picks
+        RegisterFunc("SimpleMove.PathfindAndMoveAway", (Vector3 from, float distance, bool fly) => move.MoveAway(from, distance, fly));
+        // "goal reached" / "N waypoints" / "no path (reason)" / "stuck (Ny short)" / "teleporting to X…"
+        RegisterFunc("SimpleMove.LastResult", () => move.LastResult);
+        // teleport legs (Lifestream): per-session override of the config toggle
+        RegisterFunc("SimpleMove.GetUseAetherytes", () => move.UseAetherytes);
+        RegisterAction("SimpleMove.SetUseAetherytes", (bool v) => move.UseAetherytesOverride = v);
     }
 
     public void Dispose()

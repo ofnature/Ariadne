@@ -41,6 +41,21 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// before giving up. Recoveries that gain ground don't count against this.</summary>
     public int StallRetries { get; set; } = 3;
 
+    // ---- goals / aetherytes ----
+
+    /// <summary>Teleport to an attuned aetheryte in the current zone first when that beats
+    /// travelling directly (ETA at 6 y/s walk / 20 y/s fly against cast + loading + the
+    /// trip from the crystal). Ariadne's own SimpleMove surface and the window only — the
+    /// vnavmesh.* compat gates never teleport. Executed through Lifestream.</summary>
+    public bool UseAetherytes { get; set; }
+    /// <summary>Cast + confirmation + loading screen, in seconds.</summary>
+    public float TeleportCostSeconds { get; set; } = 12f;
+    /// <summary>Only teleport when it wins by at least this many seconds.</summary>
+    public float TeleportMinSavingSeconds { get; set; } = 5f;
+    /// <summary>Interact goal: arrive within this many yalms of the object's centre plus its
+    /// hitbox radius (3.5 is the safe margin Odysseus uses in the field).</summary>
+    public float InteractRange { get; set; } = 3.5f;
+
     // ---- vnavmesh compat ----
 
     /// <summary>Claim the vnavmesh.* IPC gates when the real vnavmesh isn't loaded, so

@@ -3,6 +3,7 @@ using Ariadne.Ipc;
 using Ariadne.Mnemosyne;
 using Ariadne.Movement;
 using Ariadne.Seeding;
+using Ariadne.Travel;
 using Ariadne.Windows;
 using Ariadne.Zone;
 using Dalamud.Game.ClientState.Conditions;
@@ -10,6 +11,7 @@ using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using static Ariadne.Service;
@@ -82,7 +84,25 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         _signal = new PathIsRunningSignal(PluginInterface, () => _config.MirrorVnavPathIsRunning);
         _follower = new PathFollower(_config, _signal);
-        _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position, m => Log.Information(m));
+        // Teleport legs: Lifestream executes, the aetheryte sheet places, the character's own
+        // attunements gate. Blocked wherever a teleport is impossible or unwanted.
+        var teleports = new TeleportService(
+            new LifestreamIpc(PluginInterface, m => Log.Information(m)),
+            AetheryteCatalog.FromSheet(DataManager, m => Log.Warning(m)),
+            _config,
+            () => ClientState.TerritoryType,
+            () => Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.InCombat]
+                || Condition[ConditionFlag.RidingPillion] || Condition[ConditionFlag.BetweenAreas],
+            () =>
+            {
+                var ids = new List<uint>();
+                foreach (var e in AetheryteList)
+                    ids.Add(e.AetheryteId);
+                return ids;
+            });
+        _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position,
+            id => ObjectTable.SearchById(id) is { } o ? (o.Position, o.HitboxRadius) : null,
+            teleports, m => Log.Information(m));
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
             () => _config.SyncGateBudgetMs);

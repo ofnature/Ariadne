@@ -55,7 +55,11 @@ poll it instead of try/catching gate calls.
 | `Ariadne.Path.GetMovementAllowed` / `SetMovementAllowed` | `() → bool` / `(bool)` | pause/resume — path kept, no input written |
 | `Ariadne.SimpleMove.PathfindAndMoveTo` | `(Vector3 dest, bool fly) → bool` | pathfind via Mnemosyne, then follow; false = request rejected (already pathfinding / no player) |
 | `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | stop within `range` |
-| `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending (movement not started yet) |
+| `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending, or a teleport leg in flight (movement not started yet) |
+| `Ariadne.SimpleMove.PathfindAndMoveToInteract` | `(ulong gameObjectId, bool fly) → bool` | **interact goal**: path to a live object, stop inside interact range (config 3.5y + its hitbox radius); follows it if it wanders (re-paths on >5y drift), keeps the last known spot if it despawns; false = no such object / busy |
+| `Ariadne.SimpleMove.PathfindAndMoveAway` | `(Vector3 from, float distance, bool fly) → bool` | **away goal**: end up ≥ `distance` from `from`, at a reachable mesh point Ariadne picks (ring at the distance, fanning out from the direction away through you); satisfied by distance from `from`, not by reaching the point |
+| `Ariadne.SimpleMove.LastResult` | `() → string` | `"goal reached"`, `"N waypoints"`, `"no path (reason)"`, `"stuck (Ny short)"`, `"teleporting to X…"`, `"no such object"` |
+| `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
 
 Stall recovery is built in, two detectors: hard stall (displacement below threshold —
 frozen against a wall) and soft stall (not closing on the destination — the ±4y
@@ -64,6 +68,22 @@ current position; attempts are budgeted by ground gained, not by count — a rec
 closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. A consumer
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
+
+**Goals** (Baritone-style, `SimpleMove.*`): every move carries a goal that is checked
+live each tick while following — `MoveCloseTo` is a *near* goal, `MoveToInteract` an
+*interact* goal, `MoveAway` an *away* goal. A satisfied goal ends the path early
+(`LastResult` = `"goal reached"`); a plain `MoveTo` (range 0) is only ended by the
+follower reaching the last waypoint.
+
+**Teleport legs** (config "Use aetherytes when they save time", default off, or
+`SetUseAetherytes`): before pathing, Ariadne compares the ETA of going directly (6 y/s
+walk, 20 y/s fly) against teleporting to each attuned aetheryte in the zone and going
+from there (teleport cost, default 12 s, plus the trip). When a crystal wins by the
+minimum saving (default 5 s) it asks **Lifestream** to teleport, waits for the landing,
+then paths from the crystal. Never in a duty, in combat, on a quest vehicle, between
+areas, for an away goal, or for `vnavmesh.*` compat calls. Without Lifestream loaded
+there are simply no teleport legs. Same-zone aetherytes only; cross-zone travel stays
+the consumer's job until Mnemosyne's planner emits teleport legs.
 
 **Recovery applies only to paths Ariadne computed itself** (`SimpleMove.*`). A path you
 supplied via `Path.MoveTo` is never mesh-re-pathed — your waypoints may encode knowledge

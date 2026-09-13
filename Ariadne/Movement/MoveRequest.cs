@@ -46,6 +46,7 @@ internal sealed class MoveRequest : IDisposable
     private TeleportService.Plan? _teleport;
     private DateTime _teleportDeadline;
     private DateTime? _teleportIdleSince;
+    private bool _landed;
 
     public MoveRequest(MeshBroker broker, PathFollower follower, AriadneConfig config, Func<Vector3?> playerPosition,
         Func<ulong, (Vector3 Position, float HitboxRadius)?> resolveObject, TeleportService? teleports, Action<string> log)
@@ -115,6 +116,7 @@ internal sealed class MoveRequest : IDisposable
                     _teleport = plan;
                     _teleportDeadline = DateTime.UtcNow + TeleportTimeout;
                     _teleportIdleSince = null;
+                    _landed = false;
                     LastResult = TeleportStatus;
                     _log($"[Move] {goal.Describe()} is {plan.DirectSeconds:0}s direct, {plan.ViaSeconds:0}s via {plan.Name} — teleporting first");
                     return true;
@@ -207,7 +209,7 @@ internal sealed class MoveRequest : IDisposable
         if (now > _teleportDeadline)
         {
             _teleport = null;
-            LastResult = $"teleport to {plan.Name} never landed";
+            LastResult = _landed ? $"landed at {plan.Name} but the zone never became ready" : $"teleport to {plan.Name} never landed";
             _log($"[Move] {LastResult} — giving up");
             _goal = null;
             return;
@@ -222,6 +224,11 @@ internal sealed class MoveRequest : IDisposable
             return; // loading screen
         if (TeleportPlanner.Horizontal(pos.Value, plan.Position) <= TeleportArrivalRadius) // crystal Y may be unknown
         {
+            // The player object stands at the crystal before the zone has finished loading and
+            // the broker has re-resolved the mesh; pathing then is rejected as not ready.
+            _landed = true;
+            if (!_broker.NavIsReady)
+                return;
             _teleport = null;
             _log($"[Move] landed at {plan.Name} — pathing on to {_goal!.Describe()}");
             Request();

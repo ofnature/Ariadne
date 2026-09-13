@@ -223,6 +223,15 @@ public sealed class AriadnePlugin : IDalamudPlugin
                 Log.Information("[Aetherytes] " + line);
                 ChatGui.Print("[Ariadne] " + line);
             }
+            // the live objects in range, to check the catalog's placement against reality
+            foreach (var o in ObjectTable)
+            {
+                if (o.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Aetheryte)
+                    continue;
+                var line = $"  live object '{o.Name.TextValue}' (base id {o.BaseId}) at {o.Position:f1}";
+                Log.Information("[Aetherytes] " + line);
+                ChatGui.Print("[Ariadne] " + line);
+            }
             return;
         }
         OpenMain();

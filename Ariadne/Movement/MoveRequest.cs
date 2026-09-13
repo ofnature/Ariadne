@@ -220,7 +220,7 @@ internal sealed class MoveRequest : IDisposable
         var pos = _playerPosition();
         if (pos == null)
             return; // loading screen
-        if (Vector3.Distance(pos.Value, plan.Position) <= TeleportArrivalRadius)
+        if (TeleportPlanner.Horizontal(pos.Value, plan.Position) <= TeleportArrivalRadius) // crystal Y may be unknown
         {
             _teleport = null;
             _log($"[Move] landed at {plan.Name} — pathing on to {_goal!.Describe()}");

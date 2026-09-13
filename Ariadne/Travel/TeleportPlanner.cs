@@ -23,16 +23,25 @@ internal static class TeleportPlanner
         IEnumerable<(uint Id, Vector3 Position)> attunedInZone, float teleportCostSeconds, float minSavingSeconds)
     {
         var speed = fly ? FlySpeed : WalkSpeed;
-        var direct = Vector3.Distance(player, goal) / speed;
+        var direct = Horizontal(player, goal) / speed;
 
         Choice? best = null;
         foreach (var (id, pos) in attunedInZone)
         {
-            var via = teleportCostSeconds + Vector3.Distance(pos, goal) / speed;
+            var via = teleportCostSeconds + Horizontal(pos, goal) / speed;
             if (best == null || via < best.ViaSeconds)
                 best = new Choice(id, pos, direct, via);
         }
 
         return best != null && direct - best.ViaSeconds >= minSavingSeconds ? best : null;
+    }
+
+    /// <summary>XZ distance: marker-placed aetherytes have no height, and travel time is
+    /// about ground covered anyway.</summary>
+    public static float Horizontal(Vector3 a, Vector3 b)
+    {
+        var d = a - b;
+        d.Y = 0;
+        return d.Length();
     }
 }

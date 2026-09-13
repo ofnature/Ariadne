@@ -67,12 +67,12 @@ internal sealed class TeleportService
         if (choice == null)
         {
             var speed = fly ? TeleportPlanner.FlySpeed : TeleportPlanner.WalkSpeed;
-            var direct = Vector3.Distance(player, goal) / speed;
+            var direct = TeleportPlanner.Horizontal(player, goal) / speed;
             var best = float.MaxValue;
             var bestName = "";
             foreach (var (id, pos) in candidates)
             {
-                var via = _config.TeleportCostSeconds + Vector3.Distance(pos, goal) / speed;
+                var via = _config.TeleportCostSeconds + TeleportPlanner.Horizontal(pos, goal) / speed;
                 if (via < best) { best = via; bestName = names[id]; }
             }
             why = $"direct {direct:0}s, best via {bestName} {best:0}s — needs {_config.TeleportMinSavingSeconds:0}s saving ({candidates.Count} attuned here)";
@@ -91,7 +91,7 @@ internal sealed class TeleportService
         foreach (var e in _catalog.InTerritory(_territory()))
         {
             any = true;
-            yield return $"  #{e.Id} {e.Name} at {e.Position:f1} — {Vector3.Distance(player, e.Position):0}y away, {(attuned.Contains(e.Id) ? "attuned" : "NOT attuned")}";
+            yield return $"  #{e.Id} {e.Name} at {e.Position:f1} — {TeleportPlanner.Horizontal(player, e.Position):0}y away (horizontal), {(attuned.Contains(e.Id) ? "attuned" : "NOT attuned")}";
         }
         if (!any)
             yield return "  (no aetheryte placed in this territory)";

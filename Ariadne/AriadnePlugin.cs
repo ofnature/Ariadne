@@ -42,6 +42,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly PathIsRunningSignal _signal;
     private readonly PathFollower _follower;
     private readonly MoveRequest _move;
+    private readonly TeleportService _teleports;
     private readonly DtrProvider _dtr;
     private readonly WaypointOverlay _overlay;
     private readonly AriadneIpc _ipc;
@@ -86,7 +87,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _follower = new PathFollower(_config, _signal);
         // Teleport legs: Lifestream executes, the aetheryte sheet places, the character's own
         // attunements gate. Blocked wherever a teleport is impossible or unwanted.
-        var teleports = new TeleportService(
+        _teleports = new TeleportService(
             new LifestreamIpc(PluginInterface, m => Log.Information(m)),
             AetheryteCatalog.FromSheet(DataManager, m => Log.Warning(m)),
             _config,
@@ -102,7 +103,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
             });
         _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position,
             id => ObjectTable.SearchById(id) is { } o ? (o.Position, o.HitboxRadius) : null,
-            teleports, m => Log.Information(m));
+            _teleports, m => Log.Information(m));
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
             () => _config.SyncGateBudgetMs);
@@ -131,7 +132,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open the Ariadne status window. '/ariadne capture' rebuilds this zone from the live layout.",
+            HelpMessage = "Open the Ariadne status window. '/ariadne capture' rebuilds this zone from the live layout; '/ariadne aetherytes' lists the zone's crystals as the teleport planner sees them.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -211,6 +212,17 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             _ = _broker.CaptureCurrentZoneAsync();
             Log.Information("[Ariadne] capture requested for the current zone");
+            return;
+        }
+        // "/ariadne aetherytes": the zone's crystals as the teleport planner sees them
+        if (args.Trim().Equals("aetherytes", StringComparison.OrdinalIgnoreCase))
+        {
+            var here = ObjectTable.LocalPlayer?.Position ?? default;
+            foreach (var line in _teleports.Describe(here))
+            {
+                Log.Information("[Aetherytes] " + line);
+                ChatGui.Print("[Ariadne] " + line);
+            }
             return;
         }
         OpenMain();

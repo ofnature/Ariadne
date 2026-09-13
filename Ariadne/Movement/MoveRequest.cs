@@ -106,19 +106,25 @@ internal sealed class MoveRequest : IDisposable
 
         // Teleport leg first when a crystal wins on ETA. Ariadne's own surface only — the
         // vnavmesh.* compat gates never reach here with aetherytes on. Escapes never teleport.
-        if (UseAetherytes && _teleports != null && goal is not GoalAway
-            && _teleports.TryPlan(from.Value, goal.Target, fly) is { } plan)
+        if (UseAetherytes && _teleports != null && goal is not GoalAway)
         {
-            if (_teleports.Start(plan.AetheryteId))
+            if (_teleports.TryPlan(from.Value, goal.Target, fly, out var why) is { } plan)
             {
-                _teleport = plan;
-                _teleportDeadline = DateTime.UtcNow + TeleportTimeout;
-                _teleportIdleSince = null;
-                LastResult = TeleportStatus;
-                _log($"[Move] {goal.Describe()} is {plan.DirectSeconds:0}s direct, {plan.ViaSeconds:0}s via {plan.Name} — teleporting first");
-                return true;
+                if (_teleports.Start(plan.AetheryteId))
+                {
+                    _teleport = plan;
+                    _teleportDeadline = DateTime.UtcNow + TeleportTimeout;
+                    _teleportIdleSince = null;
+                    LastResult = TeleportStatus;
+                    _log($"[Move] {goal.Describe()} is {plan.DirectSeconds:0}s direct, {plan.ViaSeconds:0}s via {plan.Name} — teleporting first");
+                    return true;
+                }
+                _log($"[Move] Lifestream declined the teleport to {plan.Name} — going direct");
             }
-            _log($"[Move] Lifestream declined the teleport to {plan.Name} — going direct");
+            else
+            {
+                _log($"[Move] no teleport leg: {why}");
+            }
         }
         return Request();
     }

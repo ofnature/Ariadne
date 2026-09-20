@@ -11,3 +11,6 @@ external/
 *.md
 !README.md
 !docs/*.md
+
+# Agent instruction files (Claude Code skills, settings) — local, as in Argus and Minerva
+.claude/

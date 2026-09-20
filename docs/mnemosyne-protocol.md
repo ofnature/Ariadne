@@ -49,8 +49,15 @@ request, in any order. Unknown `op` → `ok:false`.
 ## Operations (v1)
 
 ### `hello`
-→ `{ ok, protocol: 1, app: "mnemosyne"|"mnemosyne-stub", version: "<semver>", meshVersion: 25 }`
-Client sends first; use to gate features and detect the stub.
+→ `{ ok, protocol: 1, app: "mnemosyne"|"mnemosyne-stub", version: "<semver>", meshVersion: 25,
+     exePath: "<absolute path>", builtAt: "YYYY-MM-DD HH:MM:SSZ" }`
+Client sends first; use to gate features and detect the stub. `exePath`/`builtAt` (added
+2026-09-20) name which *build* is answering — the exe the process started from and that file's
+write time — so a stale staged service is visible instead of silent: this machine ran a service
+built 2026-09-12 for a week while every in-process check passed, and only the live pipe knew.
+Older services omit both fields; treat their absence as "unknown", never as a fault. The service
+prints the same line at start-up, so `%APPDATA%\Mnemosyne\service.log` always names what is
+running, and Ariadne warns when the answering build is not the one the marker points at.
 
 ### `listZones`
 → `{ ok, zones: [ { cacheKey, version, customization, size, mtime } ] }`

@@ -88,6 +88,10 @@ internal sealed class HelloResponse : Response
     public string? App { get; set; }
     public string? Version { get; set; }
     public int MeshVersion { get; set; }
+    /// <summary>Which build is answering (2026-09-20). Absent on older services — treat as
+    /// "unknown", never as a fault.</summary>
+    public string? ExePath { get; set; }
+    public string? BuiltAt { get; set; }
 }
 
 internal sealed class ZoneStatusResponse : Response

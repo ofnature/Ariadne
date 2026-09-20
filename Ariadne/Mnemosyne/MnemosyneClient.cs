@@ -260,6 +260,21 @@ internal sealed class MnemosyneClient : IDisposable
             _backoff = InitialBackoff;
             _nextConnectAttempt = DateTime.MinValue;
             _logInfo($"[Mnemosyne] Connected to {ServerApp} (protocol {hello.Protocol}, mesh v{hello.MeshVersion})");
+            // Which *build* is answering, not just which app. The machine ran a service built
+            // 2026-09-12 for a week while the tree moved on and nothing said so — not the window,
+            // not the log. Both ends name it now, and a service that is not the build the marker
+            // points at gets called out, because that is what a half-finished restart looks like
+            // from here (and what "the fix isn't in yet" looks like when it is).
+            if (hello.ExePath is { Length: > 0 } runningBuild)
+            {
+                _logInfo($"[Mnemosyne] Running build: {runningBuild} ({hello.BuiltAt ?? "unknown"})");
+                if (ServiceLauncher.ResolveExe(null) is { } expected
+                    && !string.Equals(expected.TrimEnd('\\'), runningBuild.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                {
+                    _logWarning($"[Mnemosyne] Running service is not the marker's build — running {runningBuild}, marker {expected}; `run-service.ps1 -Restart` fixes it");
+                }
+            }
+
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancel.IsCancellationRequested)

@@ -143,8 +143,9 @@ One value added with the bounded searches (2026-09-19, from the Yak T'el field r
   for a consumer standing still, whatever it eventually proves.
 
 `nearest: [x,y,z]` accompanies `targetOffMesh`, `startOffMesh` and — since the island work
-below — `noRouteOnMesh`, where it carries the closest reachable ground to `to`. It is absent
-otherwise.
+below — `noRouteOnMesh`, where it carries the closest reachable ground to `to`. On the fly
+path the same field carries the closest point the flight can *certainly* reach, so a fly
+`targetOffMesh` answers with a fly-to point rather than nothing. It is absent otherwise.
 
 **Disconnected goals answer first, not last** (2026-09-19). The server labels the mesh's
 poly islands once per loaded zone (walkable polys, override links included), so when `to`
@@ -153,6 +154,20 @@ sits in a different island from `from` it returns `noRouteOnMesh` immediately, w
 goal with no route is the case that must answer *fastest* — before this it exhausted the
 whole component first (7,622 ms measured on a 141k-poly field zone) and, on the fly side,
 blew past a consumer's 10 s timeout entirely.
+
+**Reachability is provable, never disprovable** (2026-09-19). The fly side gets the walk
+side's idea in the only direction that is honest: a fly failure's `nearest` comes from a
+*bounded walk* over the coarse octree from the flight's own start (1,200 visits — under a
+second, measured 867 ms cold on a field zone), and anything that walk reaches is provably
+reachable, because the coarse graph's empty leaves are clear at full resolution. The converse
+is not claimed: the coarse graph cannot prove a goal *un*reachable — the fine voxel engine
+connects things it cannot — so a coarse failure never becomes the answer, it only names how
+far the flight can be trusted to get, and how to fly-to *that* point. Labelling every leaf
+instead, so a fly failure could be answered from a label the way the walk side answers from
+islands, was tried and rejected: `CollectFaceNeighbors` answers each adjacency query by
+probing the tree spatially, per direction, so building a whole-zone label map inside a
+request cost seconds (a cold fly answer went 1,434 → 16,066 ms). The walk side's islands are
+a *fine* mesh label and exist; the fly side's are coarse, and do not.
 
 One value the server never sends, added 2026-09-08:
 

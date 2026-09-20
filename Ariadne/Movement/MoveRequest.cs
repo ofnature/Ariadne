@@ -14,7 +14,7 @@ namespace Ariadne.Movement;
 // retry loop are the new parts.
 internal sealed class MoveRequest : IDisposable
 {
-    public bool TaskInProgress => _pending != null || _teleport != null;
+    public bool TaskInProgress => _pending != null || _teleport != null || _meshWait.Waiting;
     public string LastResult { get; private set; } = "";
     public int RetriesUsed { get; private set; }
 
@@ -43,6 +43,7 @@ internal sealed class MoveRequest : IDisposable
     private IGoal? _goal;
     private bool _fly;
     private Vector3 _plannedTarget;
+    private readonly MeshWait _meshWait = new();
     private TeleportService.Plan? _teleport;
     private DateTime _teleportDeadline;
     private DateTime? _teleportIdleSince;
@@ -101,6 +102,7 @@ internal sealed class MoveRequest : IDisposable
         }
 
         RetriesUsed = 0;
+        _meshWait.Reset();
         _futility.Reset();
         _goal = goal;
         _fly = fly;
@@ -140,6 +142,7 @@ internal sealed class MoveRequest : IDisposable
         }
         _pending = null;
         _goal = null;
+        _meshWait.Reset();
         _follower.Stop();
     }
 
@@ -157,6 +160,16 @@ internal sealed class MoveRequest : IDisposable
         {
             _pending = null;
             Promote(task);
+            return;
+        }
+
+        // A pathfind that came back "meshNotReady" is waiting on the zone's volume, not failing:
+        // re-ask on the timer rather than treating the move as impossible. Promote keeps the goal
+        // alive for exactly this, and the retry budget is what stops the waiting from being eternal.
+        if (_pending == null && _goal != null && _meshWait.Due(DateTime.UtcNow))
+        {
+            _meshWait.ClearTimer();
+            Request();
             return;
         }
 
@@ -189,6 +202,15 @@ internal sealed class MoveRequest : IDisposable
         var answer = task.IsCompletedSuccessfully
             ? task.Result
             : new MeshBroker.PathAnswer("failed", [], null, false);
+        if (answer.Waypoints.Count == 0 && _meshWait.Record(answer.Result, DateTime.UtcNow))
+        {
+            // The service answers `meshNotReady` while it is still decoding the zone's volume, off
+            // the request (measured: ~1.9 s for a field zone). Retrying is the whole point of the
+            // result — see MeshWait, and the consumer contract in MeshBroker.
+            LastResult = "waiting for mesh";
+            _log($"[Move] this zone's volume is still loading — retrying in {_meshWait.RetryDelayMs} ms ({_meshWait.Retries}/{_meshWait.MaxRetries})");
+            return; // the goal stays: we still want to go there
+        }
         if (answer.Waypoints.Count == 0)
         {
             LastResult = $"no path ({answer.Result})";
@@ -196,6 +218,7 @@ internal sealed class MoveRequest : IDisposable
             _goal = null;
             return;
         }
+        _meshWait.Reset(); // a real route: any waiting is over
 
         LastResult = $"{answer.Waypoints.Count} waypoints";
         _plannedTarget = _goal?.Target ?? answer.Waypoints[^1];

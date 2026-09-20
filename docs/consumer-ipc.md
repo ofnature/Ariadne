@@ -55,10 +55,10 @@ poll it instead of try/catching gate calls.
 | `Ariadne.Path.GetMovementAllowed` / `SetMovementAllowed` | `() → bool` / `(bool)` | pause/resume — path kept, no input written |
 | `Ariadne.SimpleMove.PathfindAndMoveTo` | `(Vector3 dest, bool fly) → bool` | pathfind via Mnemosyne, then follow; false = request rejected (already pathfinding / no player) |
 | `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | stop within `range` |
-| `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending, or a teleport leg in flight (movement not started yet) |
+| `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending, a teleport leg in flight (movement not started yet), or a zone's flight volume still loading — a `meshNotReady` answer is retried for ~5 s before it is reported |
 | `Ariadne.SimpleMove.PathfindAndMoveToInteract` | `(ulong gameObjectId, bool fly) → bool` | **interact goal**: path to a live object, stop inside interact range (config 3.5y + its hitbox radius); follows it if it wanders (re-paths on >5y drift), keeps the last known spot if it despawns; false = no such object / busy |
 | `Ariadne.SimpleMove.PathfindAndMoveAway` | `(Vector3 from, float distance, bool fly) → bool` | **away goal**: end up ≥ `distance` from `from`, at a reachable mesh point Ariadne picks (ring at the distance, fanning out from the direction away through you); satisfied by distance from `from`, not by reaching the point |
-| `Ariadne.SimpleMove.LastResult` | `() → string` | `"goal reached"`, `"N waypoints"`, `"no path (reason)"`, `"stuck (Ny short)"`, `"teleporting to X…"`, `"no such object"` |
+| `Ariadne.SimpleMove.LastResult` | `() → string` | `"goal reached"`, `"N waypoints"`, `"no path (reason)"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume), `"stuck (Ny short)"`, `"teleporting to X…"`, `"no such object"` |
 | `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
 
 Stall recovery is built in, two detectors: hard stall (displacement below threshold —

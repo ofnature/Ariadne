@@ -71,6 +71,8 @@ internal sealed class PathFollower : IDisposable
     private readonly StallDetector _stall;
     private readonly ProgressBudget _progress;
 
+    private readonly TakeoffAttempt _takeoff = new();
+
     private Vector3? _posPreviousFrame;
     private DateTime _nextJump;
     private float? _pathTolerance;
@@ -98,6 +100,7 @@ internal sealed class PathFollower : IDisposable
         _waypoints.Clear();
         _waypoints.AddRange(waypoints);
         IgnoreDeltaY = !fly;
+        _takeoff.Reset();
         DestinationTolerance = destinationTolerance;
         IsExternalPath = external;
         _pathTolerance = waypointTolerance; // per-path override; null = the global setting
@@ -195,16 +198,37 @@ internal sealed class PathFollower : IDisposable
         OverrideAFK.ResetTimers();
         _movement.Enabled = MovementAllowed;
         _movement.DesiredPosition = _waypoints[0];
-        if (_movement.DesiredPosition.Y > player.Position.Y && !Service.Condition[ConditionFlag.InFlight] && !Service.Condition[ConditionFlag.Diving] && !IgnoreDeltaY) // only on a flying path
+        var wantsTakeoff = _movement.DesiredPosition.Y > player.Position.Y
+            && !Service.Condition[ConditionFlag.InFlight] && !Service.Condition[ConditionFlag.Diving]
+            && !IgnoreDeltaY; // only on a flying path
+        if (wantsTakeoff && Service.Condition[ConditionFlag.Mounted])
         {
-            // walk->fly transition: spam jump to take off if mounted, otherwise wait (moving would just run on the spot)
-            if (Service.Condition[ConditionFlag.Mounted])
-                ExecuteJump();
-            else
+            // walk->fly transition: spam jump to take off - but on a budget. Where flight is
+            // not allowed the climb never completes, and the unbudgeted version jumped every
+            // 100 ms for the whole path.
+            var wasAbandoned = _takeoff.Abandoned;
+            if (_takeoff.Update(true, DateTime.Now))
             {
-                _movement.Enabled = false;
-                return;
+                ExecuteJump();
             }
+            else if (!wasAbandoned)
+            {
+                // Walking a flying path means height is no longer the goal, so stop measuring
+                // progress by it - otherwise every waypoint sits unreachably overhead and the
+                // walk stalls instead. This also makes stall recovery re-path as a walk.
+                IgnoreDeltaY = true;
+                Service.Log.Info($"[Follow] no takeoff in {TakeoffAttempt.DefaultBudget.TotalSeconds:0.#}s "
+                    + "— flying looks unavailable here, walking the path instead");
+            }
+        }
+        else if (wantsTakeoff)
+        {
+            _movement.Enabled = false;
+            return; // unmounted: moving would just run on the spot under the climb
+        }
+        else
+        {
+            _takeoff.Update(false, DateTime.Now); // airborne or descending: the clock stops
         }
 
         _camera.Enabled = _config.AlignCameraToMovement;

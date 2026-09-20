@@ -11,7 +11,7 @@ so the extra steps are marked **[FIRST]**. Everything else is the repeat path.
 | `AriadnePlugin.PluginVersion` | derived from the assembly version — nothing to edit |
 | `repo.json` (this repo) `AssemblyVersion` | 0.1.0.0 |
 | GitHub releases / tags | v0.1.0 |
-| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.0 |
+| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.0, `IsHide: true` until in-game movement is verified |
 | Icon at `images/icon.png` on raw | resolves, HTTP 200 |
 
 ## The two manifests — which one actually matters

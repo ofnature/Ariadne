@@ -9,9 +9,11 @@ using System.Numerics;
 namespace Ariadne.Movement;
 
 // Drives the character along a waypoint list via the vendored input hooks. Ported from
-// vnavmesh's FollowPath with two changes: config is Ariadne's, and stall handling is
+// vnavmesh's FollowPath with three changes: config is Ariadne's; stall handling is
 // window-based (StallDetector) with the decision left to the caller through OnStalled —
-// MoveRequest turns that into re-path attempts, which is the recovery vnavmesh lacks.
+// MoveRequest turns that into re-path attempts, which is the recovery vnavmesh lacks; and a
+// path may carry legs (multi-modal spans with transitions), whose walk/fly mode switches at
+// leg boundaries and whose `land` transition is executed here.
 internal sealed class PathFollower : IDisposable
 {
     public bool MovementAllowed = true;
@@ -21,6 +23,11 @@ internal sealed class PathFollower : IDisposable
     public bool IsRunning => _waypoints.Count > 0;
     public bool IgnoreDeltaY { get; private set; }
     public float DestinationTolerance { get; private set; }
+
+    /// <summary>The leg being followed ("leg 2/3: walk"), "landing" while a `land` transition
+    /// holds the path, "" for a path without legs (a legacy server's answer, or an
+    /// externally-supplied one). Shown in the window.</summary>
+    public string CurrentLeg { get; private set; } = "";
 
     /// <summary>True when the active path was supplied by an external caller (Path.MoveTo)
     /// rather than MoveRequest. Stall recovery must not touch external paths: their
@@ -72,6 +79,13 @@ internal sealed class PathFollower : IDisposable
     private readonly ProgressBudget _progress;
 
     private readonly TakeoffAttempt _takeoff = new();
+    private readonly LandingAttempt _landing = new();
+
+    private IReadOnlyList<PathLeg> _legs = Array.Empty<PathLeg>();
+    private int _legIndex = -1;
+    private int _legsConsumed;   // waypoints popped off the head; legs index into the original array
+    private bool _landingHold;   // a `land` transition is waiting for the ground
+    private bool _flyPath = true; // the request-level mode, for waypoints no leg covers
 
     private Vector3? _posPreviousFrame;
     private DateTime _nextJump;
@@ -95,17 +109,24 @@ internal sealed class PathFollower : IDisposable
     // external defaults to true: any caller that doesn't explicitly claim ownership
     // (only MoveRequest does) is treated as supplying its own waypoints
     public void Move(List<Vector3> waypoints, bool fly, float destinationTolerance = 0,
-        bool external = true, float? waypointTolerance = null)
+        bool external = true, float? waypointTolerance = null, IReadOnlyList<PathLeg>? legs = null)
     {
         _waypoints.Clear();
         _waypoints.AddRange(waypoints);
+        _flyPath = fly;
         IgnoreDeltaY = !fly;
         _takeoff.Reset();
+        _landing.Reset();
         DestinationTolerance = destinationTolerance;
         IsExternalPath = external;
         _pathTolerance = waypointTolerance; // per-path override; null = the global setting
         SteerTarget = null;
         StallCount = 0;
+        _legs = legs ?? Array.Empty<PathLeg>();
+        _legIndex = -1;
+        _legsConsumed = 0;
+        _landingHold = false;
+        CurrentLeg = "";
         _stall.Reset();
         _progress.Reset();
         _signal.Set(_waypoints.Count > 0);
@@ -118,6 +139,11 @@ internal sealed class PathFollower : IDisposable
         _waypoints.Clear();
         IsExternalPath = true;
         SteerTarget = target;
+        _legs = Array.Empty<PathLeg>();
+        _legIndex = -1;
+        _legsConsumed = 0;
+        _landingHold = false;
+        CurrentLeg = "";
         StallCount = 0;
         _stall.Reset();
         _progress.Reset();
@@ -130,6 +156,11 @@ internal sealed class PathFollower : IDisposable
         SteerTarget = null;
         IsExternalPath = false;
         _pathTolerance = null;
+        _legs = Array.Empty<PathLeg>();
+        _legIndex = -1;
+        _legsConsumed = 0;
+        _landingHold = false;
+        CurrentLeg = "";
         StallCount = 0;
         _stall.Reset();
         _progress.Reset();
@@ -159,7 +190,9 @@ internal sealed class PathFollower : IDisposable
             return;
         }
 
+        var before = _waypoints.Count;
         PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, _pathTolerance ?? Tolerance, DestinationTolerance, IgnoreDeltaY);
+        _legsConsumed += before - _waypoints.Count; // legs index into the array we were handed
 
         if (_waypoints.Count == 0)
         {
@@ -167,8 +200,17 @@ internal sealed class PathFollower : IDisposable
             _movement.Enabled = _camera.Enabled = false;
             _camera.SpeedH = _camera.SpeedV = default;
             _movement.DesiredPosition = player.Position;
+            CurrentLeg = "";
             _signal.Set(false); // path finished naturally (Advance emptied it)
             return;
+        }
+
+        // entering a leg performs its transition before anything else this frame
+        var legIndex = PathLegs.IndexAt(_legs, _legsConsumed);
+        if (legIndex != _legIndex)
+        {
+            _legIndex = legIndex;
+            BeginLeg(legIndex >= 0 ? _legs[legIndex] : null);
         }
 
         if (_config.CancelMoveOnUserInput && _movement.UserInput)
@@ -177,7 +219,31 @@ internal sealed class PathFollower : IDisposable
             return;
         }
 
-        if (_config.DetectStalls)
+        var inFlight = Service.Condition[ConditionFlag.InFlight];
+
+        // A pending `land`: hold the walk leg until the game says we are down. The waypoints
+        // below us are what the fly hook descends to (it always drives vertical).
+        if (_landingHold && !_landing.Update(inFlight, DateTime.Now))
+        {
+            _landingHold = false;
+            if (_landing.GaveUp)
+                Service.Log.Info($"[Follow] could not land in {LandingAttempt.DefaultBudget.TotalSeconds:0.#}s "
+                    + "— following the leg on foot anyway");
+            UpdateLegLabel();
+        }
+
+        // Walk-vs-fly semantics for this frame: the current leg decides, the request's flag
+        // stands in where no leg covers us. Height keeps mattering until we are down — with
+        // walk semantics a ground waypoint passes on horizontal distance alone, so a descent
+        // could end the path in mid-air.
+        var ignoreDeltaY = _legIndex >= 0 ? _legs[_legIndex].Mode == LegMode.Walk : !_flyPath;
+        if (_takeoff.Abandoned)
+            ignoreDeltaY = true; // flying looks unavailable here: walk the path
+        if (_landingHold || (_landing.GaveUp && inFlight))
+            ignoreDeltaY = false;
+        IgnoreDeltaY = ignoreDeltaY;
+
+        if (_config.DetectStalls && !_landingHold)
         {
             var destination = _waypoints[^1];
             var deltaMs = fwk.UpdateDelta.Milliseconds;
@@ -198,8 +264,9 @@ internal sealed class PathFollower : IDisposable
         OverrideAFK.ResetTimers();
         _movement.Enabled = MovementAllowed;
         _movement.DesiredPosition = _waypoints[0];
-        var wantsTakeoff = _movement.DesiredPosition.Y > player.Position.Y
-            && !Service.Condition[ConditionFlag.InFlight] && !Service.Condition[ConditionFlag.Diving]
+        var wantsTakeoff = !_landingHold
+            && _movement.DesiredPosition.Y > player.Position.Y
+            && !inFlight && !Service.Condition[ConditionFlag.Diving]
             && !IgnoreDeltaY; // only on a flying path
         if (wantsTakeoff && Service.Condition[ConditionFlag.Mounted])
         {
@@ -236,6 +303,41 @@ internal sealed class PathFollower : IDisposable
         _camera.DesiredAzimuth = Angle.FromDirectionXZ(_movement.DesiredPosition - player.Position) + 180.Degrees();
         _camera.DesiredAltitude = _config.AlignCameraHeight.Degrees();
     }
+
+    /// <summary>Entered a new leg: perform its transition, then log it. Transitions Ariadne
+    /// cannot perform yet are logged and the leg is followed as-is — refusing the path would be
+    /// worse than travelling it without the mount/dismount/teleport the planner asked for.</summary>
+    private void BeginLeg(PathLeg? leg)
+    {
+        if (leg is { } l)
+        {
+            Service.Log.Info($"[Follow] leg {_legIndex + 1}/{_legs.Count}: {l.Describe()}, {l.Count} waypoints");
+            switch (l.Enter)
+            {
+                case LegTransition.Land:
+                    _landing.Reset();
+                    _landingHold = true; // released below the moment we are not airborne
+                    break;
+                case LegTransition.Teleport:
+                    Service.Log.Info($"[Follow] planner teleport leg (aetheryte {l.EnterArg}) is not executed yet "
+                        + "— following the waypoints as-is");
+                    break;
+                case LegTransition.Mount:
+                case LegTransition.JumpOff:
+                case LegTransition.Dismount:
+                    Service.Log.Info($"[Follow] leg transition '{l.Enter.Value.ToString().ToLowerInvariant()}' is not "
+                        + "implemented — following the waypoints as-is");
+                    break;
+            }
+        }
+        UpdateLegLabel();
+    }
+
+    private void UpdateLegLabel() =>
+        CurrentLeg = _landingHold
+            ? "landing"
+            : _legIndex >= 0 ? $"leg {_legIndex + 1}/{_legs.Count}: {(_legs[_legIndex].Mode == LegMode.Fly ? "fly" : "walk")}"
+            : "";
 
     private unsafe void ExecuteJump()
     {

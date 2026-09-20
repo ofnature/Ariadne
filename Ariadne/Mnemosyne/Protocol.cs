@@ -126,10 +126,27 @@ internal sealed class FindPathResponse : Response
     public float[][]? Waypoints { get; set; }
     public bool Partial { get; set; }
 
+    /// <summary>Multi-modal spans of `waypoints` (spec: docs/mnemosyne-protocol.md → legs).
+    /// Absent from a server that plans single-mode, and from every server before 2026-08-25 —
+    /// absence means "follow the flat list", which is what those answers always meant.</summary>
+    public FindPathLegResponse[]? Legs { get; set; }
+
     // classified answers (spec 2026-08-23, served since 2026-08-24). Result lives on the
     // base Response now, since every ok:false carries one. "ok" | "targetOffMesh" |
     // "startOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable" | "avoidIgnored".
     // The client adds "serviceUnavailable" when nothing answers the pipe - the server
     // cannot report its own absence.
     public float[]? Nearest { get; set; }
+}
+
+/// <summary>One span of a multi-modal route: a run of waypoints sharing a movement mode, plus
+/// the transition that starts it. `first`/`count` index into the flat `waypoints` array, so a
+/// consumer that ignores legs still gets a followable (if mode-naive) path.</summary>
+internal sealed class FindPathLegResponse
+{
+    public string? Mode { get; set; }    // "walk" | "fly"
+    public string? Enter { get; set; }   // "mount" | "jumpOff" | "land" | "dismount" | "teleport"
+    public ulong? EnterArg { get; set; } // aetheryteId, for enter:"teleport"
+    public int First { get; set; }
+    public int Count { get; set; }
 }

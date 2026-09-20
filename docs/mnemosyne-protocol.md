@@ -187,6 +187,14 @@ get a followable (if mode-naive) path. `enter` is the transition the follower pe
 before walking/flying that leg's waypoints — mount/land at the leg boundary, land at the
 destination's floor, dismount before interiors.
 
+**Client support (Ariadne, 2026-09-19):** `walk`/`fly` mode switching and the `land`
+transition are executed — the walk leg is held while the game still reports flight, driven at
+its first waypoint, until the character is on the ground (10 s budget; after that the leg is
+followed on foot and the log says so). `mount`, `dismount`, `jumpOff` and `teleport` are parsed
+and logged as not-yet-executed, and the leg is followed as-is. An unknown mode drops that leg
+only, an unknown transition is ignored, a span past the end of `waypoints` is clamped, and a
+server that sends no `legs` at all gets the old flat-list behaviour.
+
 ### `nearestPoint` / `isPointOnMesh` / `pointOnFloor`  (spec'd 2026-08-24, Mnemosyne session)
 
 The `Query.Mesh.*` gates consumers call (Theseus, Olympus, SealBreaker), served from the

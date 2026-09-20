@@ -110,9 +110,16 @@ this is true ~0.1 s after zone-in — not after an in-game build.
 ## Coordinates and units
 
 World coordinates, Y-up, yalms, identical to `IGameObject.Position`; `fly = true`
-requests a volume path (mounted flight / diving). Paths today are plain positions; leg
-types (walk/fly/link/teleport transitions) arrive with a future protocol bump and will
-be additive.
+requests a volume path (mounted flight / diving).
+
+**Legs.** A path may arrive with `legs` — spans of the waypoint array sharing a movement mode,
+each with the transition that starts it (`mnemosyne-protocol.md` → `findPath` → legs).
+Ariadne executes what it can: walk/fly semantics switch at leg boundaries, and `land` is
+performed properly (a fly leg ending in a walk leg holds the walk leg until the game reports
+the character on the ground — a 10 s budget, after which it follows the leg on foot and logs
+that it could not land). `mount`, `dismount`, `jumpOff` and `teleport` are parsed and logged
+but not executed yet, so a leg carrying one is followed as-is. A path with no legs behaves
+exactly as before, and a consumer that ignores legs still sees the flat waypoint list.
 
 ## vnavmesh compatibility mode
 

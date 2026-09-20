@@ -205,7 +205,9 @@ internal sealed class MainWindow : Window
         ImGui.TextUnformatted("Movement");
         ImGui.SameLine();
         if (_follower.IsRunning)
-            ImGui.TextColored(Green, $"following — {_follower.Waypoints.Count} waypoints left" + (_move.RetriesUsed > 0 ? $" (re-pathed ×{_move.RetriesUsed})" : ""));
+            ImGui.TextColored(Green, $"following — {_follower.Waypoints.Count} waypoints left"
+                + (_follower.CurrentLeg.Length > 0 ? $" [{_follower.CurrentLeg}]" : "")
+                + (_move.RetriesUsed > 0 ? $" (re-pathed ×{_move.RetriesUsed})" : ""));
         else if (_move.TaskInProgress)
             ImGui.TextColored(Yellow, _move.TeleportStatus.Length > 0 ? _move.TeleportStatus : "pathfinding…");
         else

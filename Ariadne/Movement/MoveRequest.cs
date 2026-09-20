@@ -199,7 +199,9 @@ internal sealed class MoveRequest : IDisposable
 
         LastResult = $"{answer.Waypoints.Count} waypoints";
         _plannedTarget = _goal?.Target ?? answer.Waypoints[^1];
-        _follower.Move(answer.Waypoints, _fly, _goal?.PlannerTolerance ?? 0, external: false); // ours: stall recovery may re-path it
+        // ours: stall recovery may re-path it, and its legs are ours to execute (mode switches
+        // and the `land` transition; mount/dismount/teleport are logged, not performed yet)
+        _follower.Move(answer.Waypoints, _fly, _goal?.PlannerTolerance ?? 0, external: false, legs: answer.Legs);
     }
 
     private void UpdateTeleport()

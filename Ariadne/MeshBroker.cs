@@ -1,5 +1,6 @@
 using Ariadne.Ipc;
 using Ariadne.Mnemosyne;
+using Ariadne.Movement;
 using Ariadne.Seeding;
 using System;
 using System.Collections.Generic;
@@ -114,7 +115,11 @@ internal sealed class MeshBroker : IDisposable
     /// <summary>A route plus the server's own account of it. `Result` is never empty: a
     /// legacy server that says nothing is reported as "ok" when waypoints came back and
     /// "unreachable" when they did not, per the protocol doc's legacy rule.</summary>
-    public sealed record PathAnswer(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial);
+    /// <param name="Legs">The server's multi-modal plan for the same waypoints (null/empty =
+    /// single mode, or a legacy server). The follower executes the mode switches and the `land`
+    /// transition; a consumer that ignores legs still gets the flat list.</param>
+    public sealed record PathAnswer(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial,
+        IReadOnlyList<PathLeg>? Legs = null);
 
     public async Task<List<Vector3>> FindPathAsync(Vector3 from, Vector3 to, bool fly,
         float? tolerance = null, Vector3? avoidCenter = null, float avoidRadius = 0)
@@ -160,10 +165,26 @@ internal sealed class MeshBroker : IDisposable
 
         var result = resp.Result ?? (waypoints.Length > 0 ? "ok" : "unreachable"); // legacy server
         var qualifiers = (resp.Partial ? " partial" : "") + (result is not "ok" ? $" [{result}]" : "");
-        Activity($"findPath: {waypoints.Length} waypoints{qualifiers} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
-        return new PathAnswer(result,
-            [.. waypoints.Where(w => w.Length >= 3).Select(w => new Vector3(w[0], w[1], w[2]))],
-            nearest, resp.Partial);
+        var points = waypoints.Where(w => w.Length >= 3).Select(w => new Vector3(w[0], w[1], w[2])).ToList();
+        var legs = ParseLegs(resp.Legs, points.Count, waypoints.Length);
+        var legSummary = legs is { Count: > 0 } ? $" ({string.Join("→", legs.Select(l => l.Mode == LegMode.Fly ? "fly" : "walk"))})" : "";
+        Activity($"findPath: {points.Count} waypoints{qualifiers}{legSummary} ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
+        return new PathAnswer(result, points, nearest, resp.Partial, legs);
+    }
+
+    // Legs index into the waypoint array the server sent, so if a malformed entry had to be
+    // dropped the indices would point at the wrong waypoints: drop the legs instead. The path
+    // still follows, just mode-naive — exactly a legacy server's behaviour.
+    private IReadOnlyList<PathLeg>? ParseLegs(FindPathLegResponse[]? wire, int pointsKept, int pointsServed)
+    {
+        if (wire is not { Length: > 0 })
+            return null;
+        if (pointsKept != pointsServed)
+        {
+            Activity($"findPath: {pointsServed - pointsKept} malformed waypoint(s) dropped — legs ignored");
+            return null;
+        }
+        return PathLegs.Parse(wire, pointsKept);
     }
 
     // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------

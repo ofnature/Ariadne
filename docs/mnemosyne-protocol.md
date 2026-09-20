@@ -105,7 +105,9 @@ ours).
 no path). Game/world coordinates, Y-up, identical to vnavmesh's `Nav.Pathfind`.
 `partial: true` means the path stops short of `to` — for walk, disconnected mesh; for
 fly, the server's voxel-search step budget was exhausted (long open-air hops): follow the
-returned waypoints and re-query from the last one (receding horizon). **Known
+returned waypoints and re-query from the last one (receding horizon). A fly request whose
+zone's flying volume is not loaded yet answers `meshNotReady` (retryable) and loads it in
+the background, the same shape as a zone that is still building. **Known
 divergence**: runs on the raw cached mesh — no per-festival `CustomizeMesh`, no
 flood-fill pruning.
 
@@ -131,7 +133,26 @@ Two further values, added with the implementation (2026-08-24):
 - `"avoidIgnored"` — the avoid circle sealed the only corridor, so the returned route
   ignores it (see `avoidCenter` below).
 
-`nearest: [x,y,z]` accompanies `targetOffMesh` and `startOffMesh`, and is absent otherwise.
+One value added with the bounded searches (2026-09-19, from the Yak T'el field report):
+
+- `"budgetExhausted"` — the search ran out of its step budget before it could decide
+  anything, so `partial: true` and the waypoints are the best route it found toward `to`.
+  Re-issue from the last waypoint (receding horizon) or accept the partial; do **not** read
+  it as "no route exists", which is what `noRouteOnMesh` means and what this value exists to
+  keep honest. Budgets are ~2 s of search: a route that needs more than that is a bad answer
+  for a consumer standing still, whatever it eventually proves.
+
+`nearest: [x,y,z]` accompanies `targetOffMesh`, `startOffMesh` and — since the island work
+below — `noRouteOnMesh`, where it carries the closest reachable ground to `to`. It is absent
+otherwise.
+
+**Disconnected goals answer first, not last** (2026-09-19). The server labels the mesh's
+poly islands once per loaded zone (walkable polys, override links included), so when `to`
+sits in a different island from `from` it returns `noRouteOnMesh` immediately, with
+`nearest` = the closest reachable ground to `to` and the waypoints still leading there. A
+goal with no route is the case that must answer *fastest* — before this it exhausted the
+whole component first (7,622 ms measured on a 141k-poly field zone) and, on the fly side,
+blew past a consumer's 10 s timeout entirely.
 
 One value the server never sends, added 2026-09-08:
 

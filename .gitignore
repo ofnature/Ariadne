@@ -7,9 +7,10 @@ obj/
 # Reference clones — not part of this repo
 external/
 
-# Markdown stays local (working notes) — only the README and docs are published.
+# Markdown stays local (working notes) — only the README, the release checklist and docs/ ship.
 *.md
 !README.md
+!RELEASING.md
 !docs/*.md
 
 # Agent instruction files (Claude Code skills, settings) — local, as in Argus and Minerva

@@ -1,0 +1,19 @@
+[
+  {
+    "Author": "ofnature",
+    "Name": "Ariadne",
+    "Description": "Bridge between the game session and Mnemosyne, an out-of-process navmesh cache. Detects zone loads, fetches cached meshes so vnavmesh skips its build, and exposes IPC so other plugins can request meshes or paths directly.",
+    "InternalName": "Ariadne",
+    "AssemblyVersion": "0.1.0.0",
+    "RepoUrl": "https://github.com/ofnature/Ariadne",
+    "IconUrl": "https://raw.githubusercontent.com/ofnature/Ariadne/main/images/icon.png",
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "ApplicableVersion": "any",
+    "CategoryTags": ["utility"],
+    "DalamudApiLevel": 15,
+    "DownloadLinkInstall": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip",
+    "DownloadLinkTesting": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip"
+  }
+]

@@ -23,19 +23,65 @@ internal static class ServiceLauncher
     private static string MarkerPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Mnemosyne", "service.path");
 
-    public static string? ResolveExe(string? configured)
+    public static string? ResolveExe(string? configured) => ResolveExe(configured, out _);
+
+    /// <summary>Resolve the service exe, and say what failed when it cannot. The reason
+    /// matters: "no exe known" covered a configured path that does not exist, a missing
+    /// marker file, and a marker pointing at a deleted build, and those need three
+    /// different responses from whoever reads the log. One of them cost an evening.</summary>
+    public static string? ResolveExe(string? configured, out string reason)
     {
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        var hasConfigured = !string.IsNullOrWhiteSpace(configured);
+        if (hasConfigured && File.Exists(configured))
+        {
+            reason = "";
             return configured;
+        }
+
+        // Read rather than probe with File.Exists. Both game clients reported "no marker" for
+        // a file that demonstrably existed on disk with the right owner and ACL, and a bare
+        // Exists check cannot tell "absent" from "present but this process may not open it" -
+        // it answers false for both. The exception type does distinguish them.
+        var configuredNote = hasConfigured ? $"configured path '{configured}' does not exist; " : "";
+        string marked;
         try
         {
-            var marked = File.Exists(MarkerPath) ? File.ReadAllText(MarkerPath).Trim() : null;
-            return !string.IsNullOrWhiteSpace(marked) && File.Exists(marked) ? marked : null;
+            marked = File.ReadAllText(MarkerPath).Trim();
         }
-        catch (IOException)
+        catch (FileNotFoundException)
         {
-            return null; // marker being rewritten right now; next attempt will read it
+            reason = $"{configuredNote}no marker at {MarkerPath} - run Mnemosyne.Service once, or set the path in the config";
+            return null;
         }
+        catch (DirectoryNotFoundException)
+        {
+            reason = $"{configuredNote}no {Path.GetDirectoryName(MarkerPath)} directory - Mnemosyne has never run as this user";
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            reason = $"{configuredNote}marker {MarkerPath} exists but cannot be opened (access denied): {ex.Message}";
+            return null;
+        }
+        catch (IOException ex)
+        {
+            reason = $"{configuredNote}cannot read marker {MarkerPath}: {ex.Message}"; // mid-rewrite; the next attempt gets it
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(marked))
+        {
+            reason = $"marker {MarkerPath} is empty";
+            return null;
+        }
+        if (!File.Exists(marked))
+        {
+            reason = $"marker points at '{marked}', which does not exist (rebuilt or moved?)";
+            return null;
+        }
+
+        reason = "";
+        return marked;
     }
 
     /// <summary>Best-effort start. Returns true when a process was spawned (which is not a
@@ -46,10 +92,10 @@ internal static class ServiceLauncher
             return false;
         _nextAttempt = DateTime.UtcNow + Cooldown;
 
-        var exe = ResolveExe(configuredPath);
+        var exe = ResolveExe(configuredPath, out var whyNot);
         if (exe == null)
         {
-            log("[Mnemosyne] service not running and no exe known — run Mnemosyne.Service once, or set its path in the config");
+            log($"[Mnemosyne] service not running and cannot be started: {whyNot}");
             return false;
         }
 

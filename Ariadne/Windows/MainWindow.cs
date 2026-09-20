@@ -1,10 +1,12 @@
 using Ariadne.Config;
 using Ariadne.Ipc;
+using Ariadne.Mnemosyne;
 using Ariadne.Movement;
 using Ariadne.Zone;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using System;
+using System.IO;
 using System.Numerics;
 using System.Threading.Tasks;
 
@@ -21,10 +23,18 @@ internal sealed class MainWindow : Window
     private static readonly Vector4 Yellow = new(0.95f, 0.85f, 0.35f, 1);
     private static readonly Vector4 Grey = new(0.6f, 0.6f, 0.6f, 1);
 
+    // Resolve-for-display state. Recomputed at most once a second: the draw path runs every
+    // frame and this touches the disk.
+    private DateTime _serviceProbedAt = DateTime.MinValue;
+    private string? _serviceExe;
+    private string _serviceWhyNot = "";
+    private bool _servicePipeUp;
+
     private readonly AriadneConfig _config;
     private readonly Action _saveConfig;
     private readonly MeshBroker _broker;
     private readonly VnavIpc _vnav;
+    private readonly VnavCompatIpc _compat;
     private readonly ZoneWatcher _zoneWatcher;
     private readonly ReadyTracker _tracker;
     private readonly GameStatePusher _pusher;
@@ -34,7 +44,6 @@ internal sealed class MainWindow : Window
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
-    private readonly VnavCompatIpc _compat;
     private bool _pathFly;
     private float _pathRange;
     private string _lastPathResult = "";
@@ -44,6 +53,7 @@ internal sealed class MainWindow : Window
         Action saveConfig,
         MeshBroker broker,
         VnavIpc vnav,
+        VnavCompatIpc compat,
         ZoneWatcher zoneWatcher,
         ReadyTracker tracker,
         GameStatePusher pusher,
@@ -53,12 +63,12 @@ internal sealed class MainWindow : Window
         Func<Vector3?> playerPosition)
         : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
-        VnavCompatIpc compat,
         _overlay = overlay;
         _config = config;
         _saveConfig = saveConfig;
         _broker = broker;
         _vnav = vnav;
+        _compat = compat;
         _zoneWatcher = zoneWatcher;
         _tracker = tracker;
         _pusher = pusher;
@@ -68,7 +78,6 @@ internal sealed class MainWindow : Window
 
         Size = new Vector2(560, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
-        _compat = compat;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(420, 320),
@@ -364,6 +373,24 @@ internal sealed class MainWindow : Window
         ImGui.TextColored(Grey, "Meshes");
         Toggle("Auto-seed vnavmesh cache on zone load", () => _config.AutoSeed, v => _config.AutoSeed = v);
         Toggle("Build missing meshes (capture → Mnemosyne)", () => _config.BuildOnMiss, v => _config.BuildOnMiss = v);
+        ImGui.Separator();
+
+        ImGui.TextColored(Grey, "Mnemosyne service");
+        Toggle("Start the service when nothing is listening", () => _config.AutoStartMnemosyne, v => _config.AutoStartMnemosyne = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Only ever fires when the pipe is absent. A service that is already running is\nleft alone - and if two clients race, the loser exits on its own.");
+
+        ImGui.SetNextItemWidth(430);
+        var exePath = _config.MnemosyneServicePath ?? "";
+        if (ImGui.InputTextWithHint("Service exe", "blank = %APPDATA%\\Mnemosyne\\service.path", ref exePath, 512))
+        {
+            _config.MnemosyneServicePath = exePath.Trim();
+            _saveConfig();
+            _serviceProbedAt = DateTime.MinValue; // re-resolve on the next frame
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Set this when the marker file cannot be read - a second client root, or a\nprofile the game process cannot see. Editing it starts nothing.");
+        DrawServiceResolution();
         ImGui.Separator();
 
         ImGui.TextColored(Grey, "Movement");

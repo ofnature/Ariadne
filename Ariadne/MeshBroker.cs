@@ -148,7 +148,11 @@ internal sealed class MeshBroker : IDisposable
         if (resp is not { Ok: true, Waypoints: { } waypoints })
         {
             // The whole point of the classified answers: say *why*, so the caller acts once.
-            var why = resp?.Result ?? (resp == null ? "meshNotReady" : "unreachable");
+            // A null response means nothing answered the pipe at all - not running, still in
+            // backoff, or a timeout that dropped the connection. That is "serviceUnavailable",
+            // never "meshNotReady": the latter tells a consumer to wait and retry, which is
+            // exactly wrong when there is no service to wait for.
+            var why = resp?.Result ?? (resp == null ? "serviceUnavailable" : "unreachable");
             var near = nearest is { } np ? $" nearest {np:0.0}" : "";
             Activity($"findPath [{why}]{near}: {resp?.Error ?? "Mnemosyne unavailable"}");
             return new PathAnswer(why, [], nearest, false);

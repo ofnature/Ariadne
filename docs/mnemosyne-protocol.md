@@ -133,6 +133,24 @@ Two further values, added with the implementation (2026-08-24):
 
 `nearest: [x,y,z]` accompanies `targetOffMesh` and `startOffMesh`, and is absent otherwise.
 
+One value the server never sends, added 2026-09-08:
+
+- `"serviceUnavailable"` — nothing answered the pipe. The client synthesizes this when a
+  request gets no response at all: the service is not running, the connection is still in
+  backoff, or the request timed out and the connection was dropped.
+
+  It exists because the alternative was reporting a dead service as `meshNotReady`, and
+  those two demand opposite behaviour from a consumer. `meshNotReady` is a *wait* — the
+  zone is building, poll and re-issue. `serviceUnavailable` is a *stop* — nothing is
+  serving meshes, and no amount of retrying will change that until the service is back.
+  Conflating them cost a debugging session chasing a doorway that turned out to path
+  perfectly well: every request had been answered "mesh not ready" by a service that was
+  not running at all.
+
+  A consumer that only knows the older vocabulary sees an unfamiliar string, which the
+  spec already requires it to tolerate — and unfamiliar-but-honest beats familiar-and-wrong.
+
+
 Servers that omit `result` are treated as legacy (`ok` iff waypoints non-empty). Clients
 must tolerate unknown values (treat as `"unreachable"`).
 

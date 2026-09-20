@@ -128,6 +128,8 @@ internal sealed class FindPathResponse : Response
 
     // classified answers (spec 2026-08-23, served since 2026-08-24). Result lives on the
     // base Response now, since every ok:false carries one. "ok" | "targetOffMesh" |
-    // "startOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable" | "avoidIgnored"
+    // "startOffMesh" | "noRouteOnMesh" | "meshNotReady" | "unreachable" | "avoidIgnored".
+    // The client adds "serviceUnavailable" when nothing answers the pipe - the server
+    // cannot report its own absence.
     public float[]? Nearest { get; set; }
 }

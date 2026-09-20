@@ -121,6 +121,20 @@ internal sealed class MeshBroker : IDisposable
     public sealed record PathAnswer(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial,
         IReadOnlyList<PathLeg>? Legs = null);
 
+    /// <summary>A reachability window plus the server's account of it (vnavmesh has no
+    /// equivalent of this query). `Result` is never empty; the grid arrays are empty unless the
+    /// flood ran, and `States` is the byte form the consumer tuple carries.</summary>
+    public sealed record ReachableCellsAnswer(string Result, Vector3 Start, Vector2 Origin, float CellSize,
+        int Width, int Depth, int[] Columns, float[] Heights, byte[] States, bool ReachableOutside,
+        Vector3? Nearest = null, int ReachablePolys = 0, int WalkablePolys = 0)
+    {
+        /// <summary>No grid at all: the zone is not ready, nothing answered, the server does
+        /// not know the op, or what it sent could not be indexed safely. `from` stands in as
+        /// Start so the caller always has a usable point.</summary>
+        public static ReachableCellsAnswer Failed(string result, Vector3 from) =>
+            new(result, from, default, 0, 0, 0, [], [], [], false);
+    }
+
     public async Task<List<Vector3>> FindPathAsync(Vector3 from, Vector3 to, bool fly,
         float? tolerance = null, Vector3? avoidCenter = null, float avoidRadius = 0)
         => (await FindPathDetailedAsync(from, to, fly, tolerance, avoidCenter, avoidRadius).ConfigureAwait(false)).Waypoints;
@@ -186,6 +200,62 @@ internal sealed class MeshBroker : IDisposable
         }
         return PathLegs.Parse(wire, pointsKept);
     }
+
+    // ---- reachableCells (Theseus auto-solver's exploration query) ----------------------
+
+    /// <summary>Grid-reachability window: "where can I walk from here?" (spec:
+    /// docs/mnemosyne-protocol.md → reachableCells). Task-shaped and never throwing, so a
+    /// consumer can await it off the framework thread. Degrades honestly: `meshNotReady` before
+    /// the zone is ready, `serviceUnavailable` when nothing answers the pipe, `failed` when the
+    /// server does not know the op (an older Mnemosyne) or sent a grid that cannot be indexed
+    /// safely — an empty grid would read as "no walkable ground here", which is a different and
+    /// much more dangerous claim.</summary>
+    public async Task<ReachableCellsAnswer> ReachableCellsAsync(Vector3 from, float radius, float cellSize,
+        float minY, float maxY)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+        {
+            Activity("reachableCells rejected: zone not ready");
+            return ReachableCellsAnswer.Failed("meshNotReady", from);
+        }
+
+        var sw = Stopwatch.StartNew();
+        var resp = await _client.ReachableCellsAsync(key, [from.X, from.Y, from.Z], radius, cellSize, minY, maxY)
+            .ConfigureAwait(false);
+        if (resp is not { Ok: true })
+        {
+            var why = resp == null ? "serviceUnavailable" : resp.Result ?? "failed";
+            Activity($"reachableCells [{why}]: {resp?.Error ?? "Mnemosyne unavailable"}");
+            return ReachableCellsAnswer.Failed(why, from);
+        }
+
+        var result = resp.Result ?? "ok"; // a legacy server that says nothing and sent a grid
+        var columns = resp.Columns ?? [];
+        var heights = resp.Heights ?? [];
+        var states = resp.States ?? [];
+        var start = Point(resp.Start) ?? from; // no snap reported: the caller's own point back
+
+        if (columns.Length > 0 && !ReachableGrid.TryValidate(columns, heights, states, resp.Width, resp.Depth, out var whyNot))
+        {
+            Activity($"reachableCells: unusable grid {whyNot} — refusing it");
+            return ReachableCellsAnswer.Failed("failed", start);
+        }
+        if (columns.Length == 0 && result == "ok")
+            Activity($"reachableCells: empty window {resp.Width}×{resp.Depth} — no walkable surface in it");
+
+        var origin = resp.Origin is { Length: >= 2 } o ? new Vector2(o[0], o[1]) : default;
+        var nearest = Point(resp.Nearest); // only startOffMesh carries one, and it is the useful part of that answer
+        var near = nearest is { } np ? $" nearest {np:0.0}" : "";
+        Activity($"reachableCells: {columns.Length} surfaces on {resp.Width}×{resp.Depth} @ {resp.CellSize:0.##}y "
+            + $"[{result}{near}{(resp.ReachableOutside ? ", reachable outside" : "")}] ({sw.Elapsed.TotalMilliseconds:0.0}ms)");
+
+        return new ReachableCellsAnswer(result, start, origin, resp.CellSize, resp.Width, resp.Depth,
+            columns, heights, ReachableGrid.ToStates(states), resp.ReachableOutside,
+            nearest, resp.Stats?.ReachablePolys ?? 0, resp.Stats?.WalkablePolys ?? 0);
+    }
+
+    private static Vector3? Point(float[]? v) => v is { Length: >= 3 } ? new Vector3(v[0], v[1], v[2]) : null;
 
     // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------
     // Backs the Ariadne.Nav.* / Ariadne.Query.Mesh.* IPC gates. These exist so a consumer

@@ -71,6 +71,18 @@ internal sealed class AriadneIpc : IDisposable
                 ? SyncGate.Wait(broker.PointOnFloorAsync(new(flag.X, 1024, flag.Y), 5, false), syncBudgetMs(), (Vector3?)null)
                 : null);
 
+        // reachableCells — the exploration query (Theseus's auto-solver): a world-aligned grid
+        // of stacked walkable surfaces with reachability from `from`. Task-shaped by contract,
+        // never sync-shaped: await it off the framework thread. The tuple shape is fixed by
+        // docs/consumer-ipc.md, and it is a 10-element ValueTuple — which Dalamud's IPC
+        // serializer sees as a nested tuple — so if a consumer's call misbehaves rather than
+        // answering, this gate is the first suspect.
+        RegisterFunc("Query.Mesh.ReachableCells", (Vector3 from, float radius, float cellSize, float minY, float maxY) =>
+            broker.ReachableCellsAsync(from, radius, cellSize, minY, maxY)
+                .ContinueWith(t => (t.Result.Result, t.Result.Start, t.Result.Origin, t.Result.CellSize,
+                    t.Result.Width, t.Result.Depth, t.Result.Columns, t.Result.Heights, t.Result.States,
+                    t.Result.ReachableOutside)));
+
         RegisterFunc("Nav.BuildBitmap", (List<Vector3> starts, string filename, float pixelSize)
             => broker.BuildBitmapAsync(starts, filename, pixelSize));
         RegisterFunc("Nav.BuildBitmapBounded", (List<Vector3> starts, string filename, float pixelSize, Vector3[] bounds)

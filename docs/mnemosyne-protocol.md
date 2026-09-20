@@ -216,6 +216,104 @@ pointOnFloor    { cacheKey, point, halfExtentXZ=5, allowUnreachable=true }
 - `Query.Mesh.FlagToPoint` stays **client-side**: Ariadne reads the map flag from game
   state, then calls `pointOnFloor`.
 
+### `reachableCells`  (spec'd 2026-09-14, Mnemosyne session — **implemented both sides 2026-09-19**)
+
+"Where can I walk from here?" as a grid. Asked for by Theseus's dungeon auto-solver
+(`D:\Dev\Theseus\theseus-autosolver-architecture.md` §5.2) to find unexplored ground and the
+edges where the mesh is cut off. Mnemosyne answers only *reachability*: it has no notion of
+explored or visited, and must not grow one. That state is per-run and lives in the consumer.
+
+```
+reachableCells { cacheKey, from: [x,y,z], radius=120, cellSize=2, minY?, maxY? }
+  → { ok, result: "ok",
+      start:   [x,y,z],          // `from` snapped onto the mesh: where the flood began
+      origin:  [x, z],           // world X/Z of the grid's min corner
+      cellSize, width, depth,    // columns = width × depth, row-major: index = zi * width + xi
+      columns: [int, ...],       // one entry per surface: its column index, ascending
+      heights: [float, ...],     // one entry per surface: Y at the cell centre, 0.1 y precision
+      states:  [int, ...],       // one entry per surface: 1 reachable · 2 cutOff
+      reachableOutside: bool,    // the flood reached mesh beyond this window
+      stats:   { reachablePolys, walkablePolys } }
+```
+
+**The grid is aligned to the world, not to `from`.**
+`origin = floor((from.xz - radius) / cellSize) * cellSize`, and
+`width = ceil((from.x + radius - origin.x) / cellSize)` (same for `depth` on Z). A cell's centre is
+`origin + (index + 0.5) * cellSize`. Two queries with the same `cellSize` therefore share cell
+boundaries wherever they overlap. That is what lets a consumer keep one visited set across many
+queries without resampling. `radius` is half the side of a square, so 120 y at 2 y cells is
+120 × 120 = 14,400 columns.
+
+**Columns hold surfaces, not a single value, because dungeons are stacked.** A column can have
+several walkable floors, e.g. both ends of a 30 y lift shaft, or a walkway over a plaza. Every one is
+reported, highest first within its column. Samples in one column less than 2 y apart vertically
+(the agent height, so no two separate floors can be closer) merge into one surface, which is
+`reachable` if either sample was. A column with no entry has no walkable mesh (`noMesh`). The
+arrays are parallel and sparse: `columns[i]`, `heights[i]` and `states[i]` describe surface `i`.
+Optional `minY` / `maxY` (world Y) drop surfaces outside a band, for "just this floor".
+
+**How a surface is found.** A column has a surface wherever a walkable poly covers its cell centre.
+Walkable means it passes the same default filter `findPath` uses, so polys blocked by an override
+are not walkable. The height comes from the detail mesh at the centre. Sampling is at the centre
+only, so a feature narrower than a cell can be absent: a doorway meshed 0.5 y wide will not show at
+2 y cells. Connectivity through it is still correct, because reachability is computed on polys,
+not cells (below). Use `cellSize` ≤ 1 where narrow openings matter.
+
+**How reachability is decided.** One flood, not a pathfind per cell. Start from the poly nearest
+`from` (the same snap `findPath` uses: 5 y each way) and spread across poly adjacency, including
+tile borders. The flood uses the `findPath` filter and follows override links in their direction
+(both ways when `bidirectional`). **The flood is zone-wide, not clipped to the window.** A cell is
+`reachable` even when the only route to it leaves the grid and comes back. It is `cutOff` when it
+is walkable mesh the flood never reached. `reachable` means connected; it does not promise a short
+route, and `findPath` remains the authority on an actual path.
+
+**`cutOff` next to `reachable` is where gates live, but only at the same height.** Compare
+heights before calling an edge a gate. A `cutOff` surface 30 y above a `reachable` one in the next
+column is another storey, not a closed door.
+
+**`reachableOutside`** is true when the flood reached any walkable poly that lies at least partly
+outside the window (horizontally, or outside `minY`/`maxY`). `false` means everything reachable from
+here is in this answer, so an exhausted grid really is exhausted rather than just too small.
+
+**Classified results**, same vocabulary as `findPath`:
+
+- `startOffMesh`: `from` is not within the snap of any walkable poly. Carries `nearest: [x,y,z]`
+  and no grid.
+- `meshNotReady`: the zone is loading or building; retryable.
+- `failed`: bad arguments. `cellSize` must be 0.5–16, `radius` greater than 0 and at most 512,
+  and `width × depth` at most 65,536. Alignment can add a column or row, so size for that: radius
+  127 at 1 y always fits, radius 128 may not. A bigger grid is refused rather than truncated.
+
+**Deliberately not included.**
+- *Detour class.* The CLI `reachmap` marks cells reachable only by a >3× detour. That needs a
+  pathfind per cell, and exploration does not use it.
+- *Visited / explored state.* Consumer-side, per run (above).
+- *Gated links.* Links usable only once an interaction has happened (lifts, activated shuttles)
+  are not in the override format yet, and `findPath` has no conditions input either. When gated
+  links land, both ops take the same "conditions currently true" list, so a lift's far floor turns
+  `reachable` once the caller says the lever is pulled.
+
+**Cost** (measured 2026-09-19). One flood over the zone's polys plus a rasterisation of the
+window. The flood is cached per `(cacheKey, start poly, overrides stamp)` — capped at four
+components per loaded zone, and dropped with the zone, which is what makes an override edit
+invalidate it — so repeated queries from the same area redo only the rasterisation. Measured on
+a dungeon (`y6d1`, 4,673 walkable polys): flood 1.7 ms, and on a field zone (`x6f2`, 141,101
+walkable polys) 56 ms warm for the spec's 14,400-column case (121 × 121 at 2 y) — the
+rasterisation is ~4 µs per column, dominated by the per-surface detail-mesh height sample, so
+the 20 ms target above was optimistic; 56 ms is what it is, and it is 180× inside Ariadne's 10 s
+request timeout. Cold, add the zone load (596 ms for that 141k-poly field, 76 ms for the
+dungeon). Payload: 114 KB for 9,967 surfaces on that window, and 27 KB for a 961-column one —
+inside the line sizes `buildZone` already sends.
+
+**Relationship to `reachmap`.** The CLI command answers a similar question differently: one
+pathfind per cell, a 20 y horizontal snap that hides holes, and a ±2 y vertical window that
+erases storeys. It is a debugging picture, not this computation. The CLI now renders this op
+itself — `Mnemosyne.Cli reachcells <zone> [x y z] [radius] [cellSize] [minY] [maxY]`, driving
+`ZoneService.Handle` in process so it can run while a service is serving a live game session —
+so the two pictures can be put side by side. They agree wherever a cell centre is meshed and
+diverge in the fringes: `reachmap`'s 20 y snap calls a cell reachable when *any* ground is
+within 20 y of it, while this op samples the centre, as specified.
+
 ### `buildBitmap`  (spec'd 2026-08-24)
 
 `Nav.BuildBitmap{,Bounded,Multi,MultiBounded}` — Olympus uses the bounded forms.

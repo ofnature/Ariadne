@@ -102,6 +102,33 @@ and increments `Path.StallCount`; re-planning is the owner's job
 | `Ariadne.RequestMesh` | `() → Task<string>` | path to a current `.navmesh` file, or `""` |
 | `Ariadne.SeedVnavCache` | `() → Task<bool>` | hand this zone's mesh to vnavmesh's cache |
 | `Ariadne.ReportTraversal` | `(Vector3 from, Vector3 to, string mode, bool success) → Task<bool>` | feed the mesh-learning channel: `mode` `"direct"` + `success` = "I drove through where the mesh said no" (off-mesh-link evidence — Yedlihmad doorways); `success:false` = a planned route failed there. Best-effort; false = not recorded |
+| `Ariadne.Query.Mesh.ReachableCells` | `(Vector3 from, float radius, float cellSize, float minY, float maxY) → Task<(string Result, Vector3 Start, Vector2 Origin, float CellSize, int Width, int Depth, int[] Columns, float[] Heights, byte[] States, bool ReachableOutside)>` | **live both sides 2026-09-19.** Which walkable ground is reachable from `from`, as a world-aligned grid of stacked surfaces (`States`: 1 reachable · 2 cutOff; a column with no surface has no mesh). `minY`/`maxY` = `float.NaN` for no height band. Full semantics: `mnemosyne-protocol.md` → `reachableCells` |
+
+**ReachableCells** is for exploration (Theseus's auto-solver): find ground not yet visited, and
+the edges where walkable mesh is cut off. It returns reachability only. Keep visited state on your
+side, per run. The grid snaps to world-aligned cells, so answers with the same `cellSize` line up
+cell for cell and one visited set can span many queries. The surfaces are three parallel arrays:
+`Columns[i]` (`zi * Width + xi`), `Heights[i]` and `States[i]` describe surface `i`, and a column
+can hold several (stacked floors). Treat a `cutOff` surface next to a `reachable` one as a gate only
+when their heights match; otherwise it is another storey. `ReachableOutside = false` means nothing
+reachable lies beyond the window, so an exhausted grid is really exhausted. `Result` uses the
+`findPath` vocabulary (`ok`, `startOffMesh`, `meshNotReady`, `serviceUnavailable`, `failed`) and
+the arrays are empty unless it is `ok`. The return is a `ValueTuple` of BCL types, like
+`Nav.PathfindDetailed`, so no shared assembly is needed. It is `Task`-returning and never
+sync-shaped: await it off the framework thread.
+
+**Client status (2026-09-19).** Mnemosyne implements the op as of the same date, so the gate is
+live end to end — but the degradation below is what keeps it honest against an older service.
+The gate answers honestly whatever the server does:
+`failed` when Mnemosyne does not know the op yet (the server's `unknown op 'reachableCells'`
+lands in the activity log), `meshNotReady` before the zone's layout is ready,
+`serviceUnavailable` when nothing answers the pipe, and `failed` again when a grid arrives that
+cannot be indexed safely (arrays of different lengths, a column outside the `Width × Depth`
+grid) — an empty grid would read as "no walkable ground here", which is a different and much
+more dangerous claim than "I could not answer". `Start` is the server's snapped point, or your
+own `from` when it reported none (a `startOffMesh` answer). The wire answer also carries
+`nearest` and poly counts; this tuple does not surface them — say the word if the auto-solver
+wants `nearest` on an off-mesh start and we will extend the shape.
 
 **Readiness**: there is no `Nav.IsReady` twin. "Nav can answer for this zone" =
 `IsConnected && ZoneStatus is 2 or 3`. Because Mnemosyne holds meshes out of process,

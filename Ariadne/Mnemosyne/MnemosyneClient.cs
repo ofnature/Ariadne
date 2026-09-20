@@ -146,6 +146,23 @@ internal sealed class MnemosyneClient : IDisposable
             PixelSize = pixelSize, MinBounds = minBounds, MaxBounds = maxBounds,
         }, cancel);
 
+    /// <summary>Grid-reachability window ("where can I walk from here?") for exploration
+    /// consumers. Additive op (spec'd 2026-09-14): a server that predates it answers unknown-op,
+    /// which the broker reports as `failed` — never as a plausible empty grid. minY/maxY NaN
+    /// means "no height band" and is omitted from the request.</summary>
+    public Task<ReachableCellsResponse?> ReachableCellsAsync(string cacheKey, float[] from, float radius,
+        float cellSize, float minY, float maxY, CancellationToken cancel = default)
+        => SendAsync<ReachableCellsResponse>(new Request
+        {
+            Op = "reachableCells",
+            CacheKey = cacheKey,
+            From = from,
+            Radius = radius,
+            CellSize = cellSize,
+            MinY = float.IsNaN(minY) ? null : minY,
+            MaxY = float.IsNaN(maxY) ? null : maxY,
+        }, cancel);
+
     private async Task<TResp?> SendAsync<TResp>(Request request, CancellationToken cancel) where TResp : Response
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token, cancel);

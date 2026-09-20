@@ -60,6 +60,14 @@ internal sealed class Request
     public float[]? MaxBounds { get; set; }
     public string? Character { get; set; }
     public ulong? ContentId { get; set; }
+
+    // reachableCells fields (added 2026-09-14, client live 2026-09-19). minY/maxY are absent
+    // for "no height band": float.NaN is mapped to null before serialising, because the
+    // serializer refuses to write NaN at all.
+    public float? Radius { get; set; }
+    public float? CellSize { get; set; }
+    public float? MinY { get; set; }
+    public float? MaxY { get; set; }
 }
 
 internal class Response
@@ -149,4 +157,29 @@ internal sealed class FindPathLegResponse
     public ulong? EnterArg { get; set; } // aetheryteId, for enter:"teleport"
     public int First { get; set; }
     public int Count { get; set; }
+}
+
+/// <summary>reachableCells: a world-aligned grid of walkable surfaces with reachability (spec:
+/// docs/mnemosyne-protocol.md). `columns`, `heights` and `states` are parallel — one entry per
+/// surface, so a column can hold several stacked floors, and a column with no surface has no
+/// entry at all. A column index is `zi * width + xi`.</summary>
+internal sealed class ReachableCellsResponse : Response
+{
+    public float[]? Start { get; set; }   // `from` snapped onto the mesh: where the flood began
+    public float[]? Origin { get; set; }  // world X/Z of the grid's minimum corner
+    public float CellSize { get; set; }
+    public int Width { get; set; }
+    public int Depth { get; set; }
+    public int[]? Columns { get; set; }
+    public float[]? Heights { get; set; } // Y at the cell centre, 0.1 y precision
+    public int[]? States { get; set; }    // 1 reachable · 2 cutOff
+    public bool ReachableOutside { get; set; }
+    public float[]? Nearest { get; set; } // accompanies startOffMesh, like findPath
+    public ReachableStatsResponse? Stats { get; set; }
+}
+
+internal sealed class ReachableStatsResponse
+{
+    public int ReachablePolys { get; set; }
+    public int WalkablePolys { get; set; }
 }

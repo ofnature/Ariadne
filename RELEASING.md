@@ -145,5 +145,14 @@ tell anyone to update before it flips.
 - `Ariadne.csproj` pins `<OutputPath>` to `bin\$(Configuration)\` because the solution declares x64
   and a solution build would otherwise land in `bin/x64/…`, where Dalamud is not looking. The
   artifact is under `Ariadne/`, not the repo root's `bin/`.
-- Argus and Charon carry a `TouchAssemblyAfterPackaging` target (hooked to the packager targets, not
-  `Build`) so a dev-plugin reload never reads a half-written manifest. Ariadne does not have it yet.
+- The dev-plugin reload race is real and unfixed here: Dalamud reloads when the DLL changes and then
+  reads the manifest beside it, but DalamudPackager writes that manifest after the compiler — measured
+  at 0.24 s on a Release rebuild of this repo, 0.44 s in Argus. Argus and Charon carry a
+  `TouchAssemblyAfterPackaging` target meant to close it, but **it never fires**: MSBuild evaluates a
+  `.csproj` before the DalamudPackager package's targets are imported, so the
+  `AfterTargets="DefaultDalamudPackagerDebug;DefaultDalamudPackagerRelease"` reference is discarded
+  ("does not exist in the project, and will be ignored") and the touch runs *before* packaging.
+  The route that does work is the packager's own hook, `$(ProjectDir)DalamudPackager.targets`: the
+  packager imports it and disables its default targets when it exists, so that file has to invoke the
+  `DalamudPackager` task itself. Deliberately not done here — duplicating the SDK's property list
+  would silently drop any manifest field a future SDK adds, which is worse than the race.

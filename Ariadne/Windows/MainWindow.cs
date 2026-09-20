@@ -246,15 +246,6 @@ internal sealed class MainWindow : Window
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Volume pathfind — flying navigation through the 3D voxel volume instead of the\nground mesh. Needs a flyable zone and a mount (or diving); ignores the 'fly' tick.");
         ImGui.SameLine();
-        if (ImGui.Button("Stop"))
-            _move.Stop();
-        ImGui.SameLine();
-        if (ImGui.Button("Set dest = here") && _playerPosition() is { } here)
-            _pathDest = here;
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Your position.");
-        ImGui.SameLine();
-        if (ImGui.Button("Set dest = target"))
         if (ImGui.Button("Move to target"))
         {
             if (Service.TargetManager.Target is { } t)
@@ -265,6 +256,15 @@ internal sealed class MainWindow : Window
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Interact goal: path to your current target and stop inside interact range\n(config range + its hitbox). Follows it if it wanders.");
         ImGui.SameLine();
+        if (ImGui.Button("Stop"))
+            _move.Stop();
+        ImGui.SameLine();
+        if (ImGui.Button("Set dest = here") && _playerPosition() is { } here)
+            _pathDest = here;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Your position.");
+        ImGui.SameLine();
+        if (ImGui.Button("Set dest = target"))
         {
             if (Service.TargetManager.Target is { } target)
                 _pathDest = target.Position;
@@ -405,6 +405,28 @@ internal sealed class MainWindow : Window
                 _saveConfig();
             }
         }
+        Toggle("Use aetherytes when they save time (Ariadne.* moves only)", () => _config.UseAetherytes, v => _config.UseAetherytes = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Before pathing, compare travelling directly against teleporting to an attuned aetheryte in\nthis zone (Lifestream executes). Never in duties, combat, on a quest vehicle, or for\nvnavmesh.* compat calls.");
+        if (_config.UseAetherytes)
+        {
+            ImGui.Indent();
+            ImGui.SetNextItemWidth(120);
+            var cost = _config.TeleportCostSeconds;
+            if (ImGui.InputFloat("Teleport cost (s)", ref cost, 1, 5, "%.0f"))
+            {
+                _config.TeleportCostSeconds = Math.Max(0, cost);
+                _saveConfig();
+            }
+            ImGui.SetNextItemWidth(120);
+            var saving = _config.TeleportMinSavingSeconds;
+            if (ImGui.InputFloat("Minimum saving (s)", ref saving, 1, 5, "%.0f"))
+            {
+                _config.TeleportMinSavingSeconds = Math.Max(0, saving);
+                _saveConfig();
+            }
+            ImGui.Unindent();
+        }
         Toggle("Cancel current path on player movement input", () => _config.CancelMoveOnUserInput, v => _config.CancelMoveOnUserInput = v);
         Toggle("Recover from movement stalls", () => _config.DetectStalls, v => _config.DetectStalls = v);
         if (_config.DetectStalls)
@@ -432,28 +454,6 @@ internal sealed class MainWindow : Window
         }
         ImGui.Separator();
 
-        Toggle("Use aetherytes when they save time (Ariadne.* moves only)", () => _config.UseAetherytes, v => _config.UseAetherytes = v);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Before pathing, compare travelling directly against teleporting to an attuned aetheryte in\nthis zone (Lifestream executes). Never in duties, combat, on a quest vehicle, or for\nvnavmesh.* compat calls.");
-        if (_config.UseAetherytes)
-        {
-            ImGui.Indent();
-            ImGui.SetNextItemWidth(120);
-            var cost = _config.TeleportCostSeconds;
-            if (ImGui.InputFloat("Teleport cost (s)", ref cost, 1, 5, "%.0f"))
-            {
-                _config.TeleportCostSeconds = Math.Max(0, cost);
-                _saveConfig();
-            }
-            ImGui.SetNextItemWidth(120);
-            var saving = _config.TeleportMinSavingSeconds;
-            if (ImGui.InputFloat("Minimum saving (s)", ref saving, 1, 5, "%.0f"))
-            {
-                _config.TeleportMinSavingSeconds = Math.Max(0, saving);
-                _saveConfig();
-            }
-            ImGui.Unindent();
-        }
         ImGui.TextColored(Grey, "Integration");
         Toggle("Publish vnav.PathIsRunning too (BossMod yields to Ariadne movement)", () => _config.MirrorVnavPathIsRunning, v => _config.MirrorVnavPathIsRunning = v);
         Toggle("Claim vnavmesh.* IPC gates when vnavmesh is absent", () => _config.EnableVnavCompat, v => _config.EnableVnavCompat = v);

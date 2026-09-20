@@ -145,7 +145,10 @@ One value added with the bounded searches (2026-09-19, from the Yak T'el field r
 `nearest: [x,y,z]` accompanies `targetOffMesh`, `startOffMesh` and — since the island work
 below — `noRouteOnMesh`, where it carries the closest reachable ground to `to`. On the fly
 path the same field carries the closest point the flight can *certainly* reach, so a fly
-`targetOffMesh` answers with a fly-to point rather than nothing. It is absent otherwise.
+`targetOffMesh` answers with a fly-to point rather than nothing. It is absent otherwise — and
+for a walk answer also when nothing usable lies within 20 y (or the caller's larger
+tolerance), because a consolation point is a promise that something is there: an off-mesh
+`from` 500 y up gets the naked `startOffMesh`, with no `nearest` at all.
 
 **Disconnected goals answer first, not last** (2026-09-19). The server labels the mesh's
 poly islands once per loaded zone (walkable polys, override links included), so when `to`

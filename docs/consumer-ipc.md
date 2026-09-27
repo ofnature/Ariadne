@@ -101,6 +101,7 @@ and increments `Path.StallCount`; re-planning is the owner's job
 | `Ariadne.FindPath` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | empty = no path/unavailable, never throws |
 | `Ariadne.RequestMesh` | `() → Task<string>` | path to a current `.navmesh` file, or `""` |
 | `Ariadne.SeedVnavCache` | `() → Task<bool>` | hand this zone's mesh to vnavmesh's cache |
+| `Ariadne.CaptureZone` | `() → Task<bool>` | capture the live layout and rebuild this zone **even though a mesh already exists** — the only route to a festival or shared-group variant, since the automatic path fires on a cache miss only. False = zone not ready |
 | `Ariadne.ReportTraversal` | `(Vector3 from, Vector3 to, string mode, bool success) → Task<bool>` | feed the mesh-learning channel: `mode` `"direct"` + `success` = "I drove through where the mesh said no" (off-mesh-link evidence — Yedlihmad doorways); `success:false` = a planned route failed there. Best-effort; false = not recorded |
 | `Ariadne.Query.Mesh.ReachableCells` | `(Vector3 from, float radius, float cellSize, float minY, float maxY) → Task<(string Result, Vector3 Start, Vector2 Origin, float CellSize, int Width, int Depth, int[] Columns, float[] Heights, byte[] States, bool ReachableOutside)>` | **live both sides 2026-09-19.** Which walkable ground is reachable from `from`, as a world-aligned grid of stacked surfaces (`States`: 1 reachable · 2 cutOff; a column with no surface has no mesh). `minY`/`maxY` = `float.NaN` for no height band. Full semantics: `mnemosyne-protocol.md` → `reachableCells` |
 
@@ -133,6 +134,31 @@ wants `nearest` on an off-mesh start and we will extend the shape.
 **Readiness**: there is no `Nav.IsReady` twin. "Nav can answer for this zone" =
 `IsConnected && ZoneStatus is 2 or 3`. Because Mnemosyne holds meshes out of process,
 this is true ~0.1 s after zone-in — not after an in-game build.
+
+## Parity gates (the `Ariadne.Nav.*` / `Ariadne.Query.Mesh.*` twins)
+
+The same shapes as `vnavmesh.*`, registered under Ariadne's own prefix so a consumer can call both
+and diff the answers on the same input before the cutover (the compat section below serves these
+under vnavmesh's names once Ariadne owns them). All `Task`-shaped except `FlagToPoint`: nothing here
+blocks a caller. Treat the surface as **in flux while parity is established** — it is additive, and a
+reshape is announced in this file rather than discovered.
+
+| Gate | Signature | Notes |
+|---|---|---|
+| `Ariadne.Nav.IsReady` | `() → bool` | a usable mesh for this zone is in hand (local cache or Mnemosyne) |
+| `Ariadne.Nav.BuildProgress` | `() → float` | 0..1 while Mnemosyne is building, -1 idle |
+| `Ariadne.Nav.Pathfind` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | empty = no path, never throws |
+| `Ariadne.Nav.PathfindWithTolerance` | `(…, float tolerance) → Task<List<Vector3>>` | goal tolerance, the same number `SimpleMove`'s range feeds the planner |
+| `Ariadne.Nav.PathfindAvoid` | `(…, Vector3 avoidCenter, float avoidRadius) → Task<List<Vector3>>` | keep the path out of a sphere |
+| `Ariadne.Nav.PathfindDetailed` | `(from, to, fly) → Task<(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial)>` | the classified answer the list-shaped gates structurally cannot carry |
+| `Ariadne.Nav.PathfindInProgress` / `PathfindNumQueued` | `() → bool` / `() → int` | |
+| `Ariadne.Query.Mesh.NearestPoint` | `(Vector3 p, float halfExtentXZ, float halfExtentY) → Task<Vector3?>` | null = nothing within the box |
+| `Ariadne.Query.Mesh.NearestPointReachable` | same shape | `reachableOnly: true` |
+| `Ariadne.Query.Mesh.IsPointOnMesh` | `(Vector3 p, float halfExtentY, bool allowUnreachable) → Task<bool>` | |
+| `Ariadne.Query.Mesh.PointOnFloor` | `(Vector3 p, float halfExtentXZ, bool allowUnreachable) → Task<Vector3?>` | **Ariadne's argument order**; the compat gate uses vnavmesh's `(point, allowUnlandable, halfExtentXZ)` |
+| `Ariadne.Query.Mesh.FlagToPoint` | `() → Vector3?` | the one sync-shaped gate here (bounded wait, `SyncGateBudgetMs` budget): the map flag exists only in the game process, and Ariadne resolves it on the calling thread |
+| `Ariadne.Nav.BuildBitmap` | `(List<Vector3> starts, string filename, float pixelSize) → Task<string>` | returns the **written path** (Mnemosyne owns the output directory); the compat twin returns vnavmesh's `(min, max)` bounds instead |
+| `Ariadne.Nav.BuildBitmapBounded` | `(…, Vector3[] bounds) → Task<string>` | `[min, max]`; an empty array means unbounded |
 
 ## Coordinates and units
 

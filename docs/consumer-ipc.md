@@ -69,7 +69,7 @@ closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. 
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
 
-**Arrival is the goal's, not the route's** (fixed 2026-09-27, reported by SealBreaker). Paths
+**Arrival is the goal's, not the route's** (fixed 2026-09-27, reported by SealBreaker; verified in-game the same day at the Hall of Flames counter: range 3 stops within 3 y, `"goal reached"`). Paths
 Ariadne computes for `SimpleMove.*` run with a destination tolerance of 0 and end when the
 goal says so, measured against the target. Before this the follower ended the path inside
 `range` of the route's *last waypoint* — for the Flame Personnel Officer that waypoint is the

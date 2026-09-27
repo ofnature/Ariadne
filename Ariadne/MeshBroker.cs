@@ -42,6 +42,11 @@ internal sealed class MeshBroker : IDisposable
     private readonly Func<bool> _buildOnMiss;
     private readonly Func<string, Task<Zone.SceneCaptureDto?>> _captureScene; // marshals to framework thread
     private readonly Action<string> _log;
+    // Tasks started by a zone change outlive a dev reload: a zone query can be mid-retry, and a
+    // build poll runs for up to five minutes. Cancelling on dispose stops both; the source is
+    // deliberately not disposed, because the tasks still unwinding register against its token and
+    // registering against a disposed source throws.
+    private readonly CancellationTokenSource _disposeCts = new();
 
     private readonly object _activityLock = new();
     private readonly Queue<string> _activity = new();
@@ -63,7 +68,13 @@ internal sealed class MeshBroker : IDisposable
         _log = log;
     }
 
-    public void Dispose() => _client.Dispose();
+    /// <summary>Cancels the zone-query retry and the build poll, so a dev reload does not leave
+    /// either one asking a disposed client for the rest of its budget.</summary>
+    public void Dispose()
+    {
+        _disposeCts.Cancel();
+        _client.Dispose();
+    }
 
     public string[] RecentActivity
     {
@@ -368,7 +379,14 @@ internal sealed class MeshBroker : IDisposable
             if (!retry.Record(snapshot.Status, buildRunning))
                 break;
 
-            await Task.Delay(retry.Delay).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(retry.Delay, _disposeCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // unloading: nothing is waiting for this answer any more
+            }
             if (_currentKey != cacheKey)
                 return;
         }
@@ -436,7 +454,14 @@ internal sealed class MeshBroker : IDisposable
         // build runs server-side (tens of seconds); poll until it lands, then re-query → seed
         for (var waited = 0; waited < 300_000 && _currentKey == cacheKey; waited += 3000)
         {
-            await Task.Delay(3000).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(3000, _disposeCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // unloading: the build carries on server-side, and the next visit re-queries it
+            }
             var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
             if (status is { Ok: true, Status: "cached" })
             {

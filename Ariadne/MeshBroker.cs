@@ -353,34 +353,29 @@ internal sealed class MeshBroker : IDisposable
     private async Task QueryAsync(string cacheKey)
     {
         var sw = Stopwatch.StartNew();
+        var retry = new MeshRetryPolicy();
         Snapshot snapshot;
-        var attempt = 1;
         while (true)
         {
             snapshot = await BuildSnapshotAsync(cacheKey).ConfigureAwait(false);
             if (_currentKey != cacheKey)
                 return; // zone changed while we were querying — stale result, drop it
 
-            // Zone entry is peak contention on the mesh file: vnavmesh kicking its build,
-            // Mnemosyne's viewer auto-loading the same zone off the player push. An
-            // exclusive hold anywhere in that chain makes the server honestly answer
-            // "missing" (proven by locking the file and probing), and a viewer load can
-            // outlast a fixed retry window. So: a few quick retries always, and while
-            // vnavmesh is still building keep asking — a seed stays profitable for the
-            // whole build, since the Nav.Reload nudge converts it to a cache load.
-            if (snapshot.Status is not (ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable))
-                break;
+            // Negative answers are retried on MeshRetryPolicy's terms: zone entry is peak
+            // contention on the mesh file, and while vnavmesh is building a seed stays profitable
+            // for the whole build (the Nav.Reload nudge converts it into a cache load).
             var buildRunning = _vnav.IsAvailable && _vnav.BuildProgress >= 0;
-            if ((attempt >= 3 && !buildRunning) || attempt >= 90)
+            if (!retry.Record(snapshot.Status, buildRunning))
                 break;
-            await Task.Delay(TimeSpan.FromSeconds(Math.Min(attempt, 2))).ConfigureAwait(false);
+
+            await Task.Delay(retry.Delay).ConfigureAwait(false);
             if (_currentKey != cacheKey)
                 return;
-            attempt++;
         }
 
         Current = snapshot;
-        Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms{(attempt > 1 ? $", attempt {attempt}" : "")})");
+        Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms"
+            + (retry.Attempts > 1 ? $", attempt {retry.Attempts}" : "") + ")");
 
         if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);

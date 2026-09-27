@@ -1,4 +1,5 @@
 using Ariadne.Config;
+using Ariadne.Mnemosyne;
 using Ariadne.Movement;
 using Ariadne.Zone;
 using Dalamud.Plugin;
@@ -97,14 +98,17 @@ internal sealed class VnavCompatIpc : IDisposable
                 : null);
 
         // ---- Bitmaps (sync (min,max) in vnavmesh; bounded wait, generous budget) ----
+        // The fallback is BitmapBounds.NoAnswer (NaN), not default((Vector3,Vector3)): a timed-out
+        // bitmap writes no file, and (0,0,0)-(0,0,0) would be read as a real degenerate region at the
+        // origin. A caller that needs bounds anyway passed them in, and still has them.
         Func("Nav.BuildBitmap", (Vector3 start, string filename, float pixelSize)
-            => SyncGate.Wait(broker.BuildBitmapBoundsAsync([start], filename, pixelSize), BitmapBudgetMs, default((Vector3, Vector3))));
+            => SyncGate.Wait(broker.BuildBitmapBoundsAsync([start], filename, pixelSize), BitmapBudgetMs, BitmapBounds.NoAnswer));
         Func("Nav.BuildBitmapBounded", (Vector3 start, string filename, float pixelSize, Vector3 lo, Vector3 hi)
-            => SyncGate.Wait(broker.BuildBitmapBoundsAsync([start], filename, pixelSize, lo, hi), BitmapBudgetMs, (lo, hi)));
+            => SyncGate.Wait(broker.BuildBitmapBoundsAsync([start], filename, pixelSize, lo, hi), BitmapBudgetMs, BitmapBounds.NoAnswer));
         Func("Nav.BuildBitmapMulti", (List<Vector3> starts, string filename, float pixelSize)
-            => SyncGate.Wait(broker.BuildBitmapBoundsAsync(starts, filename, pixelSize), BitmapBudgetMs, default((Vector3, Vector3))));
+            => SyncGate.Wait(broker.BuildBitmapBoundsAsync(starts, filename, pixelSize), BitmapBudgetMs, BitmapBounds.NoAnswer));
         Func("Nav.BuildBitmapMultiBounded", (List<Vector3> starts, string filename, float pixelSize, Vector3 lo, Vector3 hi)
-            => SyncGate.Wait(broker.BuildBitmapBoundsAsync(starts, filename, pixelSize, lo, hi), BitmapBudgetMs, (lo, hi)));
+            => SyncGate.Wait(broker.BuildBitmapBoundsAsync(starts, filename, pixelSize, lo, hi), BitmapBudgetMs, BitmapBounds.NoAnswer));
 
         // ---- Path / SimpleMove (Ariadne's follower, vnavmesh's shapes) ----
         Action("Path.MoveTo", (List<Vector3> waypoints, bool fly) => follower.Move(waypoints, fly));

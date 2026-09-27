@@ -367,12 +367,21 @@ within 20 y of it, while this op samples the centre, as specified.
 ```
 buildBitmap { cacheKey, startingPoints: [[x,y,z], ...], filename, pixelSize,
               minBounds?: [x,y,z], maxBounds?: [x,y,z] }
-            → { ok, path: "<absolute path written>" }
+            → { ok, path: "<absolute path written>", min?: [x,y,z], max?: [x,y,z] }
 ```
 
 Flood-fills walkable polys from the starting points and writes vnavmesh's bitmap format
 (vendored `NavmeshBitmap`). Bounds omitted = whole mesh. The server writes the file and
 returns its absolute path; the client relays vnavmesh's `bool` from `ok`.
+
+**Response bounds (spec'd 2026-08-25, client live since).** vnavmesh's `BuildBitmap*` return the
+rasterized `(min, max)` rather than a bool, so the response carries them. A server that omits them
+is still fine: with request bounds the client answers those (the region the caller asked about),
+and on an unbounded request it answers **NaN bounds — never `(0,0,0)`**. The same goes for a
+refusal and for the client's own wait running out: a zero-area region at the origin is a plausible
+spot in most zones, cannot be told apart from a real degenerate bitmap, and describes a file that
+was never written. A caller that needs bounds regardless should send `minBounds`/`maxBounds` and
+keep its own copy.
 
 ### `findPath` additions  (spec'd 2026-08-24)
 

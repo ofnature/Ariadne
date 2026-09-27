@@ -203,7 +203,8 @@ not-found fallback rather than ever throwing or hanging. `Query.Mesh.*` waits up
 (`SyncGateBudgetMs`; warm answers take 1–3 ms). `Nav.BuildBitmap*` waits up to **5 s**: a bitmap is
 rasterized server-side, and vnavmesh's own window blocked comparably in-process. Treat that as a
 debug-button budget, not a per-frame one — call it off the framework thread, or the game freezes for
-as long as it waits.
+as long as it waits. A bitmap that does not answer within it returns **NaN bounds**, never a
+zero-area region — no file was written either, so check for both.
 
 ## Status
 

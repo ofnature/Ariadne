@@ -327,15 +327,20 @@ internal sealed class MeshBroker : IDisposable
         return resp is { Ok: true, Path: { } outPath } ? outPath : "";
     }
 
-    /// <summary>vnavmesh's BuildBitmap return shape: the rasterized (min,max) bounds. Falls
-    /// back to the request bounds when the server doesn't report bounds yet.</summary>
+    /// <summary>vnavmesh's BuildBitmap return shape: the rasterized (min,max) bounds. A server that
+    /// answered without reporting bounds still means the region the caller asked about — it passed
+    /// those in because it knows them — and anything else is no answer at all: the old
+    /// <c>default</c> fallback was <c>(0,0,0)</c>, which reads as a real place in a zone and
+    /// described a file nobody wrote. See <see cref="BitmapBounds"/>.</summary>
     public async Task<(Vector3 min, Vector3 max)> BuildBitmapBoundsAsync(List<Vector3> startingPoints, string filename, float pixelSize,
         Vector3? minBounds = null, Vector3? maxBounds = null)
     {
         var resp = await BuildBitmapCoreAsync(startingPoints, filename, pixelSize, minBounds, maxBounds).ConfigureAwait(false);
         if (resp is { Ok: true, Min: { Length: >= 3 } lo, Max: { Length: >= 3 } hi })
             return (new Vector3(lo[0], lo[1], lo[2]), new Vector3(hi[0], hi[1], hi[2]));
-        return (minBounds ?? default, maxBounds ?? default);
+        return resp is { Ok: true } && minBounds is { } askedLo && maxBounds is { } askedHi
+            ? (askedLo, askedHi)
+            : BitmapBounds.NoAnswer;
     }
 
     private async Task<BitmapResponse?> BuildBitmapCoreAsync(List<Vector3> startingPoints, string filename, float pixelSize,

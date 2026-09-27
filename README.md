@@ -12,8 +12,13 @@ directly.
 Ariadne didn't slay anything in the labyrinth — she just made sure the one who did never
 had to rediscover the way. Same job here.
 
-> **Status: early development.** Zone detection, Mnemosyne round-trip, cache seeding, and
-> the consumer IPC surface work against a stub server; real Mnemosyne integration pending.
+> **Status: v0.1.0, released and installed from the shared listing.** Ariadne runs against the real
+> Mnemosyne service over the pipe — no stub: zone detection, cache seeding, out-of-process builds
+> and the consumer IPC surface are live, and the movement chain has been verified in-game (a
+> character walked a Mnemosyne-computed path with vnavmesh not involved at all). The `vnavmesh.*`
+> gates are claimable by policy, so existing consumers can migrate one feature at a time. Still
+> owed: the `mount` / `dismount` / `jumpOff` leg transitions, and the in-game pass over the
+> `meshNotReady` retry. Per-gate detail: [docs/consumer-ipc.md](docs/consumer-ipc.md).
 
 ## How it fits together
 
@@ -42,6 +47,15 @@ had to rediscover the way. Same job here.
 | `Ariadne.SimpleMove.PathfindAndMoveTo` | `(Vector3 dest, bool fly) → bool` | FindPath + follow, with stall recovery (re-paths up to N times) |
 | `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | |
 | `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | |
+| `Ariadne.CaptureZone` | `() → Task<bool>` | rebuild this zone from the live layout even though a mesh is already cached — the route to a festival/shared-group variant |
+| `Ariadne.ReportTraversal` | `(Vector3 from, Vector3 to, string mode, bool success) → Task<bool>` | feedback into the mesh-learning channel: "I drove where the mesh said no" |
+| `Ariadne.Path.SteerTo` / `IsSteering` / `RemainingDistance` | `(Vector3)` / `() → bool` / `() → float` | continuous direct steering, and yalms left — deadline arithmetic for dodges |
+| `Ariadne.Path.StallCount` | `() → int` | stalls on a path you supplied: Ariadne never mesh-re-paths your waypoints, so re-planning is yours |
+| `Ariadne.SimpleMove.PathfindAndMoveToInteract` / `PathfindAndMoveAway` | `(ulong gameObjectId, bool fly)` / `(Vector3 from, float distance, bool fly)` | interact and away goals, checked live while following |
+| `Ariadne.SimpleMove.LastResult` | `() → string` | `"goal reached"` / `"N waypoints"` / `"no path (reason)"` / `"waiting for mesh"` / `"stuck (Ny short)"` / `"teleporting to X…"` |
+| `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs (Lifestream) for this session |
+| `Ariadne.Query.Mesh.ReachableCells` | `(Vector3 from, float radius, float cellSize, float minY, float maxY) → Task<(…)>` | exploration grid: which walkable ground is reachable from `from` |
+| `Ariadne.Nav.*` / `Ariadne.Query.Mesh.*` | vnavmesh-shaped twins | nearest point, point-on-floor, on-mesh, bitmaps, classified `PathfindDetailed` — for diffing against vnavmesh on the same input |
 
 Movement gates mirror vnavmesh's `Path.*` / `SimpleMove.*` shapes so consumers can switch
 by renaming the prefix. While following a path Ariadne publishes the shared-data flag

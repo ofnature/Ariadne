@@ -149,9 +149,11 @@ public sealed class AriadnePlugin : IDalamudPlugin
         // tick while _overlay was still null.
         _zoneWatcher.KeyChanged += _ =>
         {
-            _broker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
-            _tracker.OnZoneChanged(_zoneWatcher.CurrentCacheKey);
+            var cacheKey = _zoneWatcher.CurrentCacheKey;
+            _broker.OnZoneChanged(cacheKey);
+            _tracker.OnZoneChanged(cacheKey);
             _overlay.PreviewPath = null; // world coordinates from the old zone are meaningless
+            _move.OnZoneChanged(cacheKey); // ... and so are a running path's
         };
         Framework.Update += OnFrameworkTick;
 

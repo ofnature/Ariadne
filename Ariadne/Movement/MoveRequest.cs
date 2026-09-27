@@ -48,6 +48,7 @@ internal sealed class MoveRequest : IDisposable
     private DateTime _teleportDeadline;
     private DateTime? _teleportIdleSince;
     private bool _landed;
+    private string _zone = ""; // the territory the current plan's coordinates belong to
 
     public MoveRequest(MeshBroker broker, PathFollower follower, AriadneConfig config, Func<Vector3?> playerPosition,
         Func<ulong, (Vector3 Position, float HitboxRadius)?> resolveObject, TeleportService? teleports, Action<string> log)
@@ -144,6 +145,34 @@ internal sealed class MoveRequest : IDisposable
         _goal = null;
         _meshWait.Reset();
         _follower.Stop();
+    }
+
+    /// <summary>
+    /// What a zone change means for a path in flight: its waypoints are coordinates in the zone we
+    /// just left, and following them drives the character at a spot that no longer means anything.
+    /// Dropping the path is the only honest answer, whoever supplied the waypoints.
+    ///
+    /// The test is the territory, not the cache key. A festival layer or a shared-group state
+    /// changes the key inside one zone — the mesh changed, the coordinates did not — and a
+    /// consumer-supplied path there is still its owner's to keep
+    /// (docs/externally-supplied-paths.md).
+    /// </summary>
+    public void OnZoneChanged(string cacheKey)
+    {
+        if (cacheKey.Length == 0)
+            return; // layout unloading: the next key is the one worth comparing
+
+        var territory = cacheKey.Split(["__"], StringSplitOptions.None)[0];
+        var previous = _zone;
+        _zone = territory;
+        if (previous.Length == 0 || previous == territory)
+            return; // the first key of the session, or still in the same territory
+        if (!_follower.IsRunning && !TaskInProgress)
+            return; // nothing in flight to drop
+
+        Stop();
+        LastResult = "zone changed";
+        _log($"[Move] zone changed ({previous} -> {territory}) — path dropped, the old coordinates mean nothing here");
     }
 
     /// <summary>Framework-thread tick: drives the teleport leg, promotes a finished pathfind

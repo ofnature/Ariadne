@@ -55,7 +55,7 @@ internal sealed class MeshBroker : IDisposable
 
     private readonly object _activityLock = new();
     private readonly Queue<string> _activity = new();
-    private readonly HashSet<string> _buildRequested = []; // one buildZone per key per session
+    private readonly HashSet<string> _watching = []; // one watcher per key at a time
     private const int MaxActivity = 100;
 
     private volatile string _currentKey = "";
@@ -407,8 +407,8 @@ internal sealed class MeshBroker : IDisposable
 
         if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);
-        else if (snapshot.Status == ZoneMeshStatus.Missing && _buildOnMiss())
-            await RequestBuildAsync(cacheKey).ConfigureAwait(false);
+        else if (snapshot.Status is ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable)
+            await WatchUntilReadyAsync(cacheKey, force: false).ConfigureAwait(false);
     }
 
     // The vnavmesh-replacement path: nobody has a mesh, so capture the live scene (only
@@ -419,8 +419,7 @@ internal sealed class MeshBroker : IDisposable
     /// exists. The automatic path only fires on a cache miss, which means a zone vnavmesh has
     /// cached can never be captured - and the cached copy may be the wrong variant. Festival
     /// layers and shared-group states only exist in the game process, so this is the only way
-    /// to get the exact variant a player is standing in. Deliberate, so it also clears the
-    /// once-per-session guard.</summary>
+    /// to get the exact variant a player is standing in.</summary>
     public async Task<bool> CaptureCurrentZoneAsync()
     {
         var key = _currentKey;
@@ -429,59 +428,119 @@ internal sealed class MeshBroker : IDisposable
             Activity("capture rejected: zone not ready");
             return false;
         }
-        lock (_activityLock)
-            _buildRequested.Remove(key); // an explicit ask overrides "already asked this session"
         Activity($"capturing '{key}' on request");
-        await RequestBuildAsync(key).ConfigureAwait(false);
+        await WatchUntilReadyAsync(key, force: true).ConfigureAwait(false);
         return true;
     }
 
-    private async Task RequestBuildAsync(string cacheKey)
+    private const int WatchPollMs = 3000;
+    private const int WatchBudgetMs = 600_000; // a large field zone builds in minutes, and may wait its turn first
+
+    /// <summary>The current zone has no usable mesh: watch until one appears, building it if
+    /// we may. Every poll looks at vnavmesh's cache (its own in-game build may land first — in
+    /// takeover mode its IPC is ours, so the file is the only way to see that) and at the
+    /// service, and follows <see cref="BuildWatchPolicy"/>. Consumers see Nav.BuildProgress
+    /// >= 0 for as long as a mesh is on its way.</summary>
+    /// <param name="force">An explicit capture: rebuild although a mesh exists, so "a mesh is
+    /// there" does not end the watch until the build we asked for has been seen to finish.</param>
+    private async Task WatchUntilReadyAsync(string cacheKey, bool force)
     {
         lock (_activityLock)
         {
-            if (!_buildRequested.Add(cacheKey))
-                return; // already asked this session — don't spam multi-second builds
+            if (!_watching.Add(cacheKey))
+                return; // already being watched; a second poller would only double the asks
         }
-
-        var capture = await _captureScene(cacheKey).ConfigureAwait(false);
-        if (capture == null || capture.CacheKey != cacheKey)
+        try
         {
-            Activity("build capture failed (layout gone?) — will retry on next visit");
+            Zone.SceneCaptureDto? capture = null;
+            var wantBuild = force || _buildOnMiss();
+            var sends = 0;
+            var sawBuilding = false;
+            var idlePolls = 0;
+            var started = Stopwatch.StartNew();
+
+            for (var waited = 0; waited < WatchBudgetMs && _currentKey == cacheKey; waited += WatchPollMs)
+            {
+                var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
+                var reachable = status is { Ok: true };
+                var building = status is { Ok: true, Building: true };
+                sawBuilding |= building;
+                idlePolls = building ? 0 : idlePolls + 1;
+
+                var meshThere = _seeder.LocalStatus(cacheKey) == LocalMeshStatus.Current
+                    || status is { Ok: true, Status: "cached" };
+                // forced: the mesh that is there is the one being replaced, until our build has
+                // run (or two idle polls after sending say it came and went between polls)
+                var ready = force
+                    ? sends > 0 && !building && (sawBuilding || idlePolls >= 2)
+                    : meshThere;
+
+                switch (BuildWatchPolicy.Decide(ready, reachable, building, wantBuild, sends))
+                {
+                    case WatchAction.Requery:
+                        SetProgress(cacheKey, -1);
+                        Activity($"mesh for '{cacheKey}' is there (~{started.Elapsed.TotalSeconds:0}s)");
+                        await QueryAsync(cacheKey).ConfigureAwait(false);
+                        return;
+
+                    case WatchAction.SendCapture:
+                        capture ??= await _captureScene(cacheKey).ConfigureAwait(false);
+                        if (capture == null || capture.CacheKey != cacheKey)
+                        {
+                            capture = null;
+                            wantBuild = false;
+                            Activity("build capture failed (layout gone?) — watching for a mesh from elsewhere");
+                            break;
+                        }
+                        Activity($"requesting out-of-process build{(sends > 0 ? $" (again, {sends + 1}/{BuildWatchPolicy.MaxSends})" : "")}: "
+                            + $"{capture.InstanceCount} instances, {capture.Terrains.Length} terrains, {capture.MeshPaths.Length} collision meshes");
+                        var resp = await _client.BuildZoneAsync(capture).ConfigureAwait(false);
+                        if (resp is { Ok: true })
+                        {
+                            ++sends;
+                            idlePolls = 0;
+                        }
+                        else if (resp != null)
+                        {
+                            wantBuild = false; // the service refused this zone; asking again will not change its mind
+                            Activity($"buildZone declined: {resp.Error}");
+                        }
+                        break;
+
+                    case WatchAction.StopBuilding:
+                        wantBuild = false;
+                        Activity($"no mesh after {sends} build requests — not asking again this visit");
+                        break;
+                }
+
+                SetProgress(cacheKey, BuildWatchPolicy.Progress(reachable, building, status?.Progress ?? -1, wantBuild, sends));
+
+                try
+                {
+                    await Task.Delay(WatchPollMs, _disposeCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return; // unloading: a build carries on server-side, and the next visit re-queries it
+                }
+            }
+
+            if (_currentKey == cacheKey)
+                Activity($"no mesh for '{cacheKey}' within {WatchBudgetMs / 60_000}min — giving up for this visit");
+        }
+        finally
+        {
+            SetProgress(cacheKey, -1);
             lock (_activityLock)
-                _buildRequested.Remove(cacheKey);
-            return;
+                _watching.Remove(cacheKey);
         }
+    }
 
-        Activity($"requesting out-of-process build: {capture.InstanceCount} instances, {capture.Terrains.Length} terrains, {capture.MeshPaths.Length} collision meshes");
-        var resp = await _client.BuildZoneAsync(capture).ConfigureAwait(false);
-        if (resp is not { Ok: true })
-        {
-            Activity($"buildZone declined: {resp?.Error ?? "Mnemosyne unavailable"}");
-            return; // stays in _buildRequested — a declining server won't change its mind this session
-        }
-
-        // build runs server-side (tens of seconds); poll until it lands, then re-query → seed
-        for (var waited = 0; waited < 300_000 && _currentKey == cacheKey; waited += 3000)
-        {
-            try
-            {
-                await Task.Delay(3000, _disposeCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return; // unloading: the build carries on server-side, and the next visit re-queries it
-            }
-            var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
-            if (status is { Ok: true, Status: "cached" })
-            {
-                Activity($"out-of-process build complete (~{(waited + 3000) / 1000}s)");
-                await QueryAsync(cacheKey).ConfigureAwait(false); // re-enters as MnemosyneCached → auto-seed
-                return;
-            }
-        }
+    // a watcher outlives its zone by up to one poll; it must not write the next zone's progress
+    private void SetProgress(string cacheKey, float value)
+    {
         if (_currentKey == cacheKey)
-            Activity("out-of-process build did not finish within 5min — giving up for this visit");
+            _buildProgress = value;
     }
 
     private async Task<Snapshot> BuildSnapshotAsync(string cacheKey)

@@ -146,7 +146,7 @@ reshape is announced in this file rather than discovered.
 | Gate | Signature | Notes |
 |---|---|---|
 | `Ariadne.Nav.IsReady` | `() → bool` | a usable mesh for this zone is in hand (local cache or Mnemosyne) |
-| `Ariadne.Nav.BuildProgress` | `() → float` | 0..1 while Mnemosyne is building, -1 idle |
+| `Ariadne.Nav.BuildProgress` | `() → float` | 0..1 while a mesh for this zone is on its way, -1 when nothing is making one. "On its way" covers the whole out-of-process build **and** waiting for a turn behind another zone's build (the service builds one at a time; 0 is reported while queued). Wait on `>= 0`, fault on `IsReady == false && BuildProgress < 0`. Before 2026-09-27 this stayed -1 for the whole build, which made consumers fault mid-build |
 | `Ariadne.Nav.Pathfind` | `(Vector3 from, Vector3 to, bool fly) → Task<List<Vector3>>` | empty = no path, never throws |
 | `Ariadne.Nav.PathfindWithTolerance` | `(…, float tolerance) → Task<List<Vector3>>` | goal tolerance, the same number `SimpleMove`'s range feeds the planner |
 | `Ariadne.Nav.PathfindAvoid` | `(…, Vector3 avoidCenter, float avoidRadius) → Task<List<Vector3>>` | keep the path out of a sphere |

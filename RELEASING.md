@@ -12,7 +12,8 @@ so the extra steps are marked **[FIRST]**. Everything else is the repeat path.
 | `repo.json` (this repo) `AssemblyVersion` | 0.1.0.0 |
 | GitHub releases / tags | v0.1.0 |
 | Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.0, visible (`IsHide: false`, `IsTestingExclusive: false`) |
-| Icon at `images/icon.png` on raw | resolves, HTTP 200 |
+| Icon at `images/icon.png` on raw | resolves, HTTP 200 — 256×256, 78 KB since 2026-09-26 (was 512×512, 267 KB) |
+| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 123 KB asset |
 
 ## The two manifests — which one actually matters
 
@@ -47,9 +48,11 @@ Patch bump per release (0.1.0 → 0.1.1 → …):
 That is the whole list. `AriadnePlugin.PluginVersion` reads the assembly version
 (`Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)`), so the `/ariadne` load line and
 the window follow automatically, and DalamudPackager injects `AssemblyVersion` into the packaged
-`Ariadne.json` from the same value — the shipped manifest cannot disagree with the csproj. When
-`repo.json` exists, its `AssemblyVersion` **and all three `DownloadLink*` tag URLs** need the same
-bump (4 edits in that file); a mismatch makes Dalamud either miss the update or reinstall in a loop.
+`Ariadne.json` from the same value — the shipped manifest cannot disagree with the csproj. Each
+`repo.json` (this repo's mirror and the Olympus listing) needs its `AssemblyVersion` bumped to the
+same version — **one edit per file**, because the three `DownloadLink*` point at
+`releases/latest/download/latest.zip` (changed 2026-09-26) rather than at a tag, so there is no URL
+left to forget. A version mismatch makes Dalamud either miss the update or reinstall in a loop.
 
 ### 3. Build and test
 
@@ -103,8 +106,9 @@ cd D:/Dev/Olympus && git add repo.json && git commit -m "chore(repo): add Ariadn
 Olympus uses conventional-commit style for these (`chore(repo): point X at vN`), unlike the plugin
 repos.
 
-On later releases this step is just the same 4 edits as step 2 — version plus the three URLs. Do not
-edit only this repo's mirror and assume it shipped.
+On later releases this step is just the same single edit as step 2 (`AssemblyVersion`) — the download
+URLs point at `releases/latest/download/latest.zip` and never need touching. Do not edit only this
+repo's mirror and assume it shipped.
 
 ### 7. Verify from the remote, not from disk
 

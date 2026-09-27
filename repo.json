@@ -12,8 +12,8 @@
     "ApplicableVersion": "any",
     "CategoryTags": ["utility"],
     "DalamudApiLevel": 15,
-    "DownloadLinkInstall": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip",
-    "DownloadLinkTesting": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/ofnature/Ariadne/releases/download/v0.1.0/latest.zip"
+    "DownloadLinkInstall": "https://github.com/ofnature/Ariadne/releases/latest/download/latest.zip",
+    "DownloadLinkTesting": "https://github.com/ofnature/Ariadne/releases/latest/download/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/ofnature/Ariadne/releases/latest/download/latest.zip"
   }
 ]

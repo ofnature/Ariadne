@@ -233,14 +233,16 @@ internal sealed class MainWindow : Window
             ImGui.SameLine(90);
             ImGui.TextUnformatted($"{tgt.Name.TextValue} — {dist:0.0}y");
             ImGui.SameLine();
-            if (dist <= 3.5f)
-                ImGui.TextColored(Green, "can interact");
+            // the same arithmetic the interact goal stops on: the configured range plus the hitbox
+            var reach = Math.Clamp(_config.InteractRange, 1f, 5f) + tgt.HitboxRadius;
+            if (dist <= reach)
+                ImGui.TextColored(Green, $"can interact (within {reach:0.0}y)");
             else if (dist <= 7f)
-                ImGui.TextColored(Yellow, "interact range (edge)");
+                ImGui.TextColored(Yellow, $"interact range (edge) — goal stops at {reach:0.0}y");
             else
                 ImGui.TextColored(Grey, "out of reach");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Interact range is ~7y; ≤3.5y is safely inside it (the margins Odysseus\nuses in the field). Some objects differ — gathering nodes are shorter.");
+                ImGui.SetTooltip("Green is where an interact goal stops: the Config tab's interact range plus this\nobject's hitbox radius. The game's own range is ~7y; some objects differ — gathering\nnodes are shorter.");
         }
 
         ImGui.SetNextItemWidth(240);

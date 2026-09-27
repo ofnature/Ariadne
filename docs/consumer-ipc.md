@@ -195,11 +195,15 @@ in two modes:
   same shared array, so that mirror is unreliable while vnavmesh is loaded — read
   `ariadne.PathIsRunning` instead.
 
-Releasing the names (takeover switched off, compat disabled, or Ariadne unloading)
-empties them; vnavmesh registers only at load, so reload it to restore its own set.
-Sync-shaped gates (`Query.Mesh.*`, bitmaps) answer via a bounded blocking wait (default
-100 ms budget; warm answers take 1–3 ms) and return the not-found fallback rather than
-ever throwing or hanging.
+Releasing the names (takeover switched off, compat disabled, or Ariadne unloading) empties them;
+vnavmesh registers only at load, so reload it to restore its own set.
+
+Sync-shaped gates answer through a bounded blocking wait **on your thread**, and return the
+not-found fallback rather than ever throwing or hanging. `Query.Mesh.*` waits up to 100 ms
+(`SyncGateBudgetMs`; warm answers take 1–3 ms). `Nav.BuildBitmap*` waits up to **5 s**: a bitmap is
+rasterized server-side, and vnavmesh's own window blocked comparably in-process. Treat that as a
+debug-button budget, not a per-frame one — call it off the framework thread, or the game freezes for
+as long as it waits.
 
 ## Status
 

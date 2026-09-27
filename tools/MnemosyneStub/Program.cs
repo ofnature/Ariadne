@@ -6,6 +6,14 @@ using System.Text.Json.Serialization;
 // developed before Mnemosyne.Service exists. Serves straight from a directory of vnavmesh
 // .navmesh files — by default the live meshcache, or pass a directory as the first argument.
 // findPath is intentionally unimplemented; that requires Mnemosyne's real query engine.
+//
+// It speaks the op set as it stood on 2026-08-24: hello, listZones, zoneStatus, getMesh,
+// updateGameState, getGameState, notifyMeshBuilt. Everything added since — buildZone,
+// reachableCells, nearestPoint, isPointOnMesh, pointOnFloor, buildBitmap, reportTraversal, and
+// hello's exePath/builtAt — answers `unknown op`, which is exactly what a service older than the
+// tree looks like. That makes it useful for old-server degradation work and useless as a stand-in
+// for the live service: the real one answers those ops, so anything checked against this stub says
+// nothing about live behaviour.
 
 const string PipeName = "mnemosyne";
 const int ProtocolVersion = 1;
@@ -20,6 +28,17 @@ var meshDir = args.Length > 0
 if (!Directory.Exists(meshDir))
 {
     Console.Error.WriteLine($"mesh directory not found: {meshDir}");
+    return 1;
+}
+
+// Refuse to run next to another server. A named pipe allows several server instances on one name,
+// and a client connecting to \\.\pipe\mnemosyne lands on whichever instance answers first — so a
+// second server does not take over, it silently serves part of the traffic. That is a debugging
+// trap rather than a feature, and the trap is easy to walk into: the real service autostarts.
+if (File.Exists($@"\\.\pipe\{PipeName}"))
+{
+    Console.Error.WriteLine($"something is already serving \\\\.\\pipe\\{PipeName} (Mnemosyne.Service?) — "
+        + "refusing to start a second server on the same pipe name");
     return 1;
 }
 

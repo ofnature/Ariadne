@@ -73,8 +73,13 @@ public sealed class AriadnePlugin : IDalamudPlugin
             }),
             m => Log.Information(m));
 
+        // Two pipelines can be measured now, and each is recorded when it answers: vnavmesh's own
+        // build or cache load (the milestone-5 comparison) and Ariadne's, whose number is the one
+        // that survives vnavmesh being uninstalled. A pipeline that is not present simply does not
+        // hold the measurement open.
         _tracker = new ReadyTracker(
-            () => vnav.IsAvailable, () => vnav.IsReady, () => vnav.BuildProgress,
+            () => new MeshReadiness(vnav.IsAvailable, vnav.IsReady, vnav.BuildProgress),
+            () => new MeshReadiness(client.IsConnected, _broker.NavIsReady, _broker.NavBuildProgress),
             () => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
 
         _zoneWatcher = new ZoneWatcher(Framework);

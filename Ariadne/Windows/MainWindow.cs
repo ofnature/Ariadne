@@ -357,10 +357,17 @@ internal sealed class MainWindow : Window
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip(t.CacheKey);
                 ImGui.TableNextColumn();
-                if (t.Built)
-                    ImGui.TextColored(Red, "built");
-                else
-                    ImGui.TextColored(Green, "cache load");
+                // which pipeline answered, and whether it paid with a build: the pair the seeded
+                // path is supposed to produce (Ariadne in ~0.1 s, vnavmesh building for seconds)
+                ImGui.TextColored(t.Built ? Red : Green, t.Label);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(t.Source switch
+                    {
+                        MeshSource.VnavmeshBuilt => "vnavmesh built the mesh in-game",
+                        MeshSource.VnavmeshCache => "vnavmesh loaded it from its own meshcache",
+                        MeshSource.AriadneBuilt => "Mnemosyne built it out of process (nobody had a mesh for the zone)",
+                        _ => "Ariadne had one in hand: vnavmesh's cache, or Mnemosyne's store",
+                    });
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(FormatDuration(t.Seconds));
             }

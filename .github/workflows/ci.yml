@@ -1,8 +1,8 @@
 # Ariadne's tests are game-free by design, but the build needs Dalamud's dev assemblies, which
 # normally exist only on a machine that has run the game with the dev loader. The distribution zip
-# carries the same files at its root, so the job extracts it and points DalamudLibPath at it —
-# exactly the override used locally to check this assumption (fresh clone + that override:
-# Failed: 0, Skipped: 6 — the vendored-parity block, which has no reference clone here).
+# carries the same files at its root, so the job extracts it and points DalamudLibPath at it (job
+# level, so packaging gets it too). The first run's Test step reported on the runner: Failed: 0,
+# Skipped: 6 — the vendored-parity block, which has no reference clone here.
 #
 # Skip counts are stated as that rule rather than a total on purpose: a pinned total goes stale the
 # moment a test is added. Failed: 0 is the gate; a skip outside the parity class is news.
@@ -16,6 +16,13 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    env:
+      # MSBuild takes environment variables as properties, so every dotnet command in the job uses the
+      # extracted assemblies. The first run of this workflow proved why that has to be job-level: the
+      # Test step (which had -p:DalamudLibPath) passed, and the Release step — with no -p of its own —
+      # failed with "Dalamud installation not found at
+      # C:\Users\runneradmin\AppData\Roaming\XIVLauncher\addon\Hooks\dev\".
+      DalamudLibPath: ${{ github.workspace }}/dalamud-dev/
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +42,7 @@ jobs:
           Get-Content dalamud-dev/revision.txt
 
       - name: Test
-        run: dotnet test Ariadne.Tests/Ariadne.Tests.csproj -p:DalamudLibPath="${{ github.workspace }}/dalamud-dev/"
+        run: dotnet test Ariadne.Tests/Ariadne.Tests.csproj
 
       - name: Release build (the artifact the listing installs)
         run: dotnet build Ariadne/Ariadne.csproj -c Release

@@ -4,8 +4,12 @@ obj/
 .vs/
 .idea/
 
-# Reference clones — not part of this repo
-external/
+# Reference clones — not part of this repo. The revision they must be at IS part of it: the pin is
+# what makes the vendored-parity comparison mean something (tools/fetch-vendored.sh materializes
+# the clone at it). The directory itself is named, not just its contents, so git never descends
+# into the clone.
+external/*
+!external/ffxiv_navmesh.pin
 
 # Markdown stays local (working notes) — only the README, the release checklist and docs/ ship.
 *.md

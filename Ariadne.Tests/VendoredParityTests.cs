@@ -11,6 +11,29 @@ namespace Ariadne.Tests;
 // deliberate deviation. They skip when the clone is absent (it is gitignored).
 public class VendoredParityTests
 {
+    /// <summary>
+    /// The comparisons below are only worth as much as the thing they compare against, so the
+    /// reference clone's revision is checked first and out loud. A clone at some other commit
+    /// either hides a real drift (older) or reports the copies as wrong (newer) — and both
+    /// failures look like a code problem rather than a checkout problem.
+    /// </summary>
+    [NeedsVendoredReference]
+    public void ReferenceClone_IsAtThePinnedRevision()
+    {
+        var head = VendoredParity.CloneHead();
+        Assert.False(head == null,
+            "could not read the reference clone's revision — is git on PATH? "
+            + "Run tools/fetch-vendored.sh to materialize it.");
+
+        var pinned = VendoredParity.PinnedRevision;
+        Assert.True(pinned.Length == 40, $"external/ffxiv_navmesh.pin does not name a commit: '{pinned}'");
+        Assert.True(pinned == head,
+            $"the reference clone is at {head}, but the vendored copies were last checked against {pinned} "
+            + "(external/ffxiv_navmesh.pin).\n"
+            + "Check out the pinned revision (tools/fetch-vendored.sh), or — if upstream genuinely moved — "
+            + "re-verify the copies against the new one and bump the pin deliberately.");
+    }
+
     [NeedsVendoredReference]
     public void VendoredCopies_MatchTheReference()
     {

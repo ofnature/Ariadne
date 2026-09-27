@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -17,7 +18,8 @@ public sealed class NeedsVendoredReferenceAttribute : FactAttribute
     public NeedsVendoredReferenceAttribute()
     {
         if (VendoredParity.Root == null)
-            Skip = "external/ffxiv_navmesh is not present — vendored-parity checks skipped.";
+            Skip = "external/ffxiv_navmesh is not present — vendored-parity checks skipped. "
+                + "Run tools/fetch-vendored.sh to materialize the pinned revision.";
     }
 }
 
@@ -48,6 +50,52 @@ public static class VendoredParity
                 return dir.FullName;
         }
         return null;
+    }
+
+    /// <summary>
+    /// The upstream revision the vendored copies were last checked against, from
+    /// <c>external/ffxiv_navmesh.pin</c> — which is committed, unlike the clone it describes.
+    ///
+    /// Without it, "has the vendored code drifted from upstream?" is answered against whatever
+    /// clone happens to be on the machine: an older one passes and hides a real drift, a newer one
+    /// fails as if the copies were wrong. The pin makes the reference a decision rather than an
+    /// accident.
+    /// </summary>
+    public static string PinnedRevision =>
+        File.ReadAllLines(Ref("external/ffxiv_navmesh.pin"))
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.Length > 0 && !line.StartsWith('#'))
+            ?.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? "";
+
+    /// <summary>The clone's HEAD commit, or null when git cannot be asked at all (not on PATH — the
+    /// comparison itself needs no git, which is why this is the only place that does).</summary>
+    public static string? CloneHead()
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-C");
+        psi.ArgumentList.Add(Ref("external/ffxiv_navmesh"));
+        psi.ArgumentList.Add("rev-parse");
+        psi.ArgumentList.Add("HEAD");
+        try
+        {
+            using var git = Process.Start(psi);
+            if (git == null)
+                return null;
+            var head = git.StandardOutput.ReadToEnd().Trim();
+            git.WaitForExit(10_000);
+            return git.ExitCode == 0 && head.Length > 0 ? head : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     // ---- normalization -------------------------------------------------------------------

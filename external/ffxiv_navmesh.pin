@@ -1,0 +1,10 @@
+# The upstream revision Ariadne's vendored copies were last checked against.
+#
+# external/ffxiv_navmesh is gitignored, so a fresh clone has no reference to compare against and
+# the vendored-parity tests skip. This file is the committed half of that pair: materialize the
+# clone at this commit with tools/fetch-vendored.sh, and Ariadne.Tests/VendoredParityTests will
+# fail if the clone on disk is at any other revision — a reference nobody chose proves nothing.
+#
+# To move the pin: re-verify the copies against the new revision (the tests compare them for you),
+# re-vendor whatever drifted, then bump this line and say why in the commit.
+f4f84e104b31c04029bbbf188f14f6ae79cdc4bf

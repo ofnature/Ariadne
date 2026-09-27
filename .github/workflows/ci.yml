@@ -1,0 +1,41 @@
+# Ariadne's tests are game-free by design, but the build needs Dalamud's dev assemblies, which
+# normally exist only on a machine that has run the game with the dev loader. The distribution zip
+# carries the same files at its root, so the job extracts it and points DalamudLibPath at it —
+# exactly the override used locally to check this assumption (fresh clone + that override:
+# Failed: 0, Skipped: 6 — the vendored-parity block, which has no reference clone here).
+#
+# Skip counts are stated as that rule rather than a total on purpose: a pinned total goes stale the
+# moment a test is added. Failed: 0 is the gate; a skip outside the parity class is news.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Dalamud.NET.Sdk is restored from nuget.org; only the assemblies it builds against come from
+      # here. The URL is the artifact XIVLauncher itself installs from, so it tracks the live API
+      # level — a Dalamud bump that outruns the SDK shows up as a build failure, not a silent pass.
+      - name: Fetch Dalamud's dev assemblies
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/goatcorp/dalamud-distrib/raw/main/latest.zip -OutFile dalamud-dev.zip
+          Expand-Archive -Path dalamud-dev.zip -DestinationPath dalamud-dev -Force
+          Get-Item dalamud-dev/Dalamud.dll | Select-Object -ExpandProperty Length
+          Get-Content dalamud-dev/revision.txt
+
+      - name: Test
+        run: dotnet test Ariadne.Tests/Ariadne.Tests.csproj -p:DalamudLibPath="${{ github.workspace }}/dalamud-dev/"
+
+      - name: Release build (the artifact the listing installs)
+        run: dotnet build Ariadne/Ariadne.csproj -c Release

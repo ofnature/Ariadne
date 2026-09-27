@@ -148,6 +148,14 @@ internal sealed class MainWindow : Window
         DrawKeyValue("layout key", _zoneWatcher.CurrentKey);
         if (snapshot.MeshPath is { } path)
             DrawKeyValue("mesh file", path);
+        if (_zoneWatcher.Interrupted)
+        {
+            // The two keys above are the last good read, not the current zone — say so rather
+            // than presenting a stale pair as live (the watcher is retrying in the background).
+            ImGui.TextColored(Red, $"layout poll failing ×{_zoneWatcher.ConsecutiveFailures} — showing the last good read");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(_zoneWatcher.LastError);
+        }
         ImGui.Separator();
     }
 

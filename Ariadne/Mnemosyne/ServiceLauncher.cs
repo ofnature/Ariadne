@@ -2,11 +2,22 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Ariadne.Mnemosyne;
 
 // Phase 0 of the vnavmesh replacement: the mesh service has to be there without the user
 // remembering to start it. When the pipe is absent we start Mnemosyne.Service ourselves.
+//
+// Three places a service can come from, in the order that keeps every machine honest:
+//
+//   1. the configured path  - an explicit choice; always wins
+//   2. the marker           - a service that has run here before stamped its own path into
+//                             %APPDATA%\Mnemosyne\service.path; a development machine keeps
+//                             running its own build and never pays for the bundled copy
+//   3. the bundled payload  - `service/` inside the plugin package, staged under %APPDATA% and
+//                             launched from there (see BundledService), so a machine that has
+//                             never built Mnemosyne still gets a working service
 //
 // Four game clients on one PC means four plugin instances racing to do this. That race is
 // resolved by the service itself, which holds a Global\MnemosyneService mutex and exits
@@ -17,11 +28,21 @@ internal static class ServiceLauncher
 {
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(30);
     private static DateTime _nextAttempt = DateTime.MinValue;
+    private static int _staging; // guards the one-time payload copy across clients and retries
+
+    internal static string AppDataRoot =>
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
     /// <summary>Path Mnemosyne stamps for us on every service/CLI run, so the plugin does
     /// not have to hardcode a build directory.</summary>
-    private static string MarkerPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Mnemosyne", "service.path");
+    internal static string MarkerPath => Path.Combine(AppDataRoot, "Mnemosyne", "service.path");
+
+    /// <summary>The plugin's own folder — where a package's `service/` payload sits.</summary>
+    internal static string PluginDir =>
+        Path.GetDirectoryName(typeof(ServiceLauncher).Assembly.Location) ?? "";
+
+    /// <summary>What autostart would use, why, and whether it has to be staged first.</summary>
+    internal readonly record struct Resolution(string? Exe, string Reason, bool NeedsStaging);
 
     public static string? ResolveExe(string? configured) => ResolveExe(configured, out _);
 
@@ -31,52 +52,90 @@ internal static class ServiceLauncher
     /// different responses from whoever reads the log. One of them cost an evening.</summary>
     public static string? ResolveExe(string? configured, out string reason)
     {
+        var resolved = Resolve(configured);
+        reason = resolved.Reason;
+        return resolved.Exe;
+    }
+
+    /// <summary>The marker's answer alone — what the client compares the answering build
+    /// against. Deliberately excludes the bundled payload: that comparison is about a
+    /// half-finished restart of a hand-built service, and the bundled one is not that.</summary>
+    public static string? ResolveMarkerExe(out string reason, string? appDataRoot = null) =>
+        ReadMarker(out reason, appDataRoot ?? AppDataRoot);
+
+    /// <summary>configured → marker → bundled. Pure but for the disk reads, so the tests can
+    /// point it at temp directories.</summary>
+    internal static Resolution Resolve(string? configured, string? appDataRoot = null, string? pluginDir = null)
+    {
         var hasConfigured = !string.IsNullOrWhiteSpace(configured);
         if (hasConfigured && File.Exists(configured))
+            return new Resolution(configured, "configured path", false);
+
+        var roots = appDataRoot ?? AppDataRoot;
+        var marked = ReadMarker(out var markerWhyNot, roots);
+        if (marked != null)
+            return new Resolution(marked, "the marker", false);
+
+        var payload = BundledService.PayloadDir(pluginDir ?? PluginDir);
+        if (payload != null)
         {
-            reason = "";
-            return configured;
+            var version = BundledService.Describe(payload);
+            var stage = BundledService.StageDir(roots, version);
+            var staged = BundledService.IsStaged(stage);
+            return new Resolution(
+                Path.Combine(stage, BundledService.ExeName),
+                $"the bundled service {version} at {payload}"
+                    + (staged ? " (already staged)" : " (not staged yet)"),
+                NeedsStaging: !staged);
         }
 
-        // Read rather than probe with File.Exists. Both game clients reported "no marker" for
-        // a file that demonstrably existed on disk with the right owner and ACL, and a bare
-        // Exists check cannot tell "absent" from "present but this process may not open it" -
-        // it answers false for both. The exception type does distinguish them.
         var configuredNote = hasConfigured ? $"configured path '{configured}' does not exist; " : "";
+        return new Resolution(null,
+            $"{configuredNote}{markerWhyNot}; and this package carries no service at "
+            + $"'{Path.Combine(pluginDir ?? PluginDir, BundledService.PayloadFolderName)}' "
+            + "(reinstall the plugin, or set the path in the config)",
+            false);
+    }
+
+    /// <summary>The existing marker logic, on its own so the two callers can differ: autostart
+    /// follows it anywhere, the window's build comparison wants only what it says.</summary>
+    internal static string? ReadMarker(out string reason, string? appDataRoot = null)
+    {
         string marked;
         try
         {
-            marked = File.ReadAllText(MarkerPath).Trim();
+            marked = File.ReadAllText(Path.Combine(appDataRoot ?? AppDataRoot, "Mnemosyne", "service.path")).Trim();
         }
         catch (FileNotFoundException)
         {
-            reason = $"{configuredNote}no marker at {MarkerPath} - run Mnemosyne.Service once, or set the path in the config";
+            reason = "no service.path marker - no hand-built service has ever run for this user";
             return null;
         }
         catch (DirectoryNotFoundException)
         {
-            reason = $"{configuredNote}no {Path.GetDirectoryName(MarkerPath)} directory - Mnemosyne has never run as this user";
+            reason = "no %APPDATA%\\Mnemosyne directory and no service.path marker to read - "
+                + "no hand-built service has ever run for this user";
             return null;
         }
         catch (UnauthorizedAccessException ex)
         {
-            reason = $"{configuredNote}marker {MarkerPath} exists but cannot be opened (access denied): {ex.Message}";
+            reason = $"marker exists but cannot be opened (access denied): {ex.Message}";
             return null;
         }
         catch (IOException ex)
         {
-            reason = $"{configuredNote}cannot read marker {MarkerPath}: {ex.Message}"; // mid-rewrite; the next attempt gets it
+            reason = $"cannot read marker: {ex.Message}"; // mid-rewrite; the next attempt gets it
             return null;
         }
 
         if (string.IsNullOrWhiteSpace(marked))
         {
-            reason = $"marker {MarkerPath} is empty";
+            reason = "the service.path marker is empty";
             return null;
         }
         if (!File.Exists(marked))
         {
-            reason = $"marker points at '{marked}', which does not exist (rebuilt or moved?)";
+            reason = $"the marker points at '{marked}', which does not exist (rebuilt or moved?)";
             return null;
         }
 
@@ -84,21 +143,59 @@ internal static class ServiceLauncher
         return marked;
     }
 
-    /// <summary>Best-effort start. Returns true when a process was spawned (which is not a
-    /// promise it won). Rate-limited so a permanently-broken exe cannot spin.</summary>
+    /// <summary>Best-effort start. Returns true when a process was spawned, or when a
+    /// stage-and-launch is under way — neither is a promise the service won, since losing the
+    /// mutex to another client is the happy path. Rate-limited so a permanently-broken exe
+    /// cannot spin.</summary>
     public static bool TryLaunch(string? configuredPath, Action<string> log)
     {
         if (DateTime.UtcNow < _nextAttempt)
             return false;
         _nextAttempt = DateTime.UtcNow + Cooldown;
 
-        var exe = ResolveExe(configuredPath, out var whyNot);
-        if (exe == null)
+        var target = Resolve(configuredPath);
+        if (target.Exe == null)
         {
-            log($"[Mnemosyne] service not running and cannot be started: {whyNot}");
+            log($"[Mnemosyne] service not running and cannot be started: {target.Reason}");
             return false;
         }
 
+        if (!target.NeedsStaging)
+            return LaunchOnce(target.Exe, log);
+
+        // The payload has to be copied out before it runs (~95 MB), and this is called from
+        // whatever thread noticed the pipe missing — the framework thread. So the copy happens
+        // off it, and the launch happens when the copy is done rather than on the next tick.
+        if (Interlocked.CompareExchange(ref _staging, 1, 0) != 0)
+            return false; // another client is already staging it; their copy will launch
+
+        var payload = BundledService.PayloadDir(PluginDir)!;
+        var stageDir = Path.GetDirectoryName(target.Exe)!;
+        log($"[Mnemosyne] no service yet — {target.Reason}; copying it out of the plugin folder, "
+            + "which a running service would otherwise lock against the next plugin update");
+        Task.Run(() =>
+        {
+            try
+            {
+                var staged = BundledService.Stage(payload, stageDir);
+                _nextAttempt = DateTime.MinValue; // staged: don't wait out the cooldown to start it
+                log($"[Mnemosyne] staged the bundled service to {staged}");
+                LaunchOnce(staged, log);
+            }
+            catch (Exception ex)
+            {
+                log($"[Mnemosyne] could not stage the bundled service: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _staging, 0);
+            }
+        });
+        return true;
+    }
+
+    private static bool LaunchOnce(string exe, Action<string> log)
+    {
         using var gate = new Mutex(false, @"Global\MnemosyneServiceLaunch");
         var held = false;
         try

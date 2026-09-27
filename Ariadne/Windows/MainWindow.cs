@@ -517,7 +517,10 @@ internal sealed class MainWindow : Window
             return;
         _serviceProbedAt = DateTime.UtcNow;
         _serviceExe = ServiceLauncher.ResolveExe(_config.MnemosyneServicePath, out _serviceWhyNot);
-        _markerExe = ServiceLauncher.ResolveExe(null); // the marker alone: what the client compares against
+        // the marker alone: what the client compares the answering build against. The bundled
+        // payload is deliberately not part of that comparison — it is never the build a
+        // half-finished `run-service.ps1 -Restart` left behind, which is what it looks for.
+        _markerExe = ServiceLauncher.ResolveMarkerExe(out _);
         _servicePipeUp = File.Exists($@"\\.\pipe\{Protocol.PipeName}");
     }
 

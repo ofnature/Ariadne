@@ -35,6 +35,20 @@ internal sealed class PathFollower : IDisposable
     /// corners), and a mesh re-path would discard exactly that (docs/externally-supplied-paths.md).</summary>
     public bool IsExternalPath { get; private set; }
 
+    /// <summary>The last path ended because its waypoints ran out (or the destination
+    /// tolerance was met), not because something stopped it. MoveRequest reads this to tell
+    /// "arrived at the end of the route" from "cancelled". Reset by Move/SteerTo/Stop.</summary>
+    public bool FinishedNaturally { get; private set; }
+
+    /// <summary>How close an owned path gets to its final waypoint before that waypoint
+    /// counts as reached. The consumer's waypoint tolerance still governs corners; it must not
+    /// decide where the route ends, because a consumer that sets it to 3 (SealBreaker does)
+    /// would otherwise stop 3 y from the end of every route.</summary>
+    public const float OwnedArrivalTolerance = 0.25f;
+
+    internal static float OwnedFinalTolerance(float waypointTolerance)
+        => MathF.Min(waypointTolerance, OwnedArrivalTolerance);
+
     /// <summary>Stalls detected on the current path (external callers poll this over IPC to
     /// re-plan with their own geometry knowledge). Reset by Move/Stop.</summary>
     public int StallCount { get; private set; }
@@ -119,6 +133,7 @@ internal sealed class PathFollower : IDisposable
         _landing.Reset();
         DestinationTolerance = destinationTolerance;
         IsExternalPath = external;
+        FinishedNaturally = false;
         _pathTolerance = waypointTolerance; // per-path override; null = the global setting
         SteerTarget = null;
         StallCount = 0;
@@ -138,6 +153,7 @@ internal sealed class PathFollower : IDisposable
     {
         _waypoints.Clear();
         IsExternalPath = true;
+        FinishedNaturally = false;
         SteerTarget = target;
         _legs = Array.Empty<PathLeg>();
         _legIndex = -1;
@@ -155,6 +171,7 @@ internal sealed class PathFollower : IDisposable
         _waypoints.Clear();
         SteerTarget = null;
         IsExternalPath = false;
+        FinishedNaturally = false;
         _pathTolerance = null;
         _legs = Array.Empty<PathLeg>();
         _legIndex = -1;
@@ -191,11 +208,16 @@ internal sealed class PathFollower : IDisposable
         }
 
         var before = _waypoints.Count;
-        PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, _pathTolerance ?? Tolerance, DestinationTolerance, IgnoreDeltaY);
+        var waypointTolerance = _pathTolerance ?? Tolerance;
+        // Externally supplied paths keep vnavmesh's arrival rules exactly. A path MoveRequest
+        // owns arrives by its goal, so its last waypoint is only "passed" when we are on it.
+        PathProgress.Advance(_waypoints, player.Position, _posPreviousFrame, waypointTolerance, DestinationTolerance, IgnoreDeltaY,
+            IsExternalPath ? null : OwnedFinalTolerance(waypointTolerance));
         _legsConsumed += before - _waypoints.Count; // legs index into the array we were handed
 
         if (_waypoints.Count == 0)
         {
+            FinishedNaturally = before > 0;
             _posPreviousFrame = player.Position;
             _movement.Enabled = _camera.Enabled = false;
             _camera.SpeedH = _camera.SpeedV = default;

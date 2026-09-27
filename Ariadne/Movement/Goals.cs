@@ -17,6 +17,9 @@ internal interface IGoal
     /// range; 0 = exact.</summary>
     float PlannerTolerance { get; }
     bool IsSatisfied(Vector3 player);
+    /// <summary>How many yalms outside the goal the player stands; 0 inside it. What a route
+    /// that ended short reports, so a consumer knows by how much.</summary>
+    float DistanceOutside(Vector3 player);
     string Describe();
 }
 
@@ -26,6 +29,15 @@ internal sealed class GoalNear(Vector3 dest, float range) : IGoal
     public Vector3 Target => dest;
     public float PlannerTolerance => range;
     public bool IsSatisfied(Vector3 player) => range > 0 && Vector3.Distance(player, dest) <= range;
+
+    // A range is a reach, so it is measured in 3D like the game measures interaction. An
+    // exact destination is a spot on the ground: only the horizontal error says whether we
+    // are on it (the route's last waypoint is the mesh's height, not the caller's).
+    public float DistanceOutside(Vector3 player)
+        => range > 0
+            ? MathF.Max(0, Vector3.Distance(player, dest) - range)
+            : new Vector2(player.X - dest.X, player.Z - dest.Z).Length();
+
     public string Describe() => range > 0 ? $"{dest:f1} within {range:0.#}y" : $"{dest:f1}";
 }
 
@@ -67,6 +79,12 @@ internal sealed class GoalInteract : IGoal
         return Vector3.Distance(player, _lastKnown) <= PlannerTolerance;
     }
 
+    public float DistanceOutside(Vector3 player)
+    {
+        Refresh();
+        return MathF.Max(0, Vector3.Distance(player, _lastKnown) - PlannerTolerance);
+    }
+
     public string Describe() => $"interact range of {_lastKnown:f1} ({PlannerTolerance:0.#}y)";
 
     private void Refresh()
@@ -92,5 +110,6 @@ internal sealed class GoalAway : IGoal
     public Vector3 Target { get; set; }
     public float PlannerTolerance => 0;
     public bool IsSatisfied(Vector3 player) => Vector3.Distance(player, From) >= Distance;
+    public float DistanceOutside(Vector3 player) => MathF.Max(0, Distance - Vector3.Distance(player, From));
     public string Describe() => $"{Distance:0.#}y away from {From:f1}";
 }

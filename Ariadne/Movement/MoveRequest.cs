@@ -48,6 +48,21 @@ internal sealed class MoveRequest : IDisposable
     private DateTime _teleportDeadline;
     private DateTime? _teleportIdleSince;
     private bool _landed;
+    private bool _following; // the follower is running a path we handed it for _goal
+
+    /// <summary>An exact destination (range 0) counts as reached within this much horizontal
+    /// error: the route ends on the mesh's version of the point, not the caller's.</summary>
+    internal const float ExactArrivalSlack = 1f;
+
+    /// <summary>What a finished route amounts to. A ranged goal is reached only inside its
+    /// range; anything else names how far short the closest reachable point was, so a
+    /// consumer retrying on LastResult knows that retrying will not help.</summary>
+    internal static string DescribeEnd(IGoal goal, Vector3 player)
+    {
+        var outside = goal.DistanceOutside(player);
+        var slack = goal.PlannerTolerance > 0 ? 0f : ExactArrivalSlack;
+        return outside <= slack ? "goal reached" : $"closest reachable point, {outside:0.0}y short";
+    }
     private string _zone = ""; // the territory the current plan's coordinates belong to
 
     public MoveRequest(MeshBroker broker, PathFollower follower, AriadneConfig config, Func<Vector3?> playerPosition,
@@ -143,6 +158,7 @@ internal sealed class MoveRequest : IDisposable
         }
         _pending = null;
         _goal = null;
+        _following = false;
         _meshWait.Reset();
         _follower.Stop();
     }
@@ -202,8 +218,20 @@ internal sealed class MoveRequest : IDisposable
             return;
         }
 
-        if (_pending != null || _goal == null || !_follower.IsRunning || _follower.IsExternalPath)
+        if (_pending != null || _goal == null)
             return;
+        if (_follower.IsRunning && _follower.IsExternalPath)
+        {
+            _following = false; // a consumer replaced our path with its own: the goal went with it
+            _goal = null;
+            return;
+        }
+        if (!_follower.IsRunning)
+        {
+            if (_following)
+                Conclude();
+            return;
+        }
         if (_playerPosition() is not { } pos)
             return;
         if (_goal.IsSatisfied(pos))
@@ -212,6 +240,7 @@ internal sealed class MoveRequest : IDisposable
             LastResult = "goal reached";
             _log($"[Move] goal reached: {_goal.Describe()}");
             _goal = null;
+            _following = false;
             return;
         }
         var drift = Vector3.Distance(_goal.Target, _plannedTarget);
@@ -223,8 +252,26 @@ internal sealed class MoveRequest : IDisposable
         }
     }
 
+    // The follower emptied the path itself. Arrival is judged against the goal, never against
+    // the route's last waypoint: for an NPC behind a counter those are two yalms apart.
+    private void Conclude()
+    {
+        _following = false;
+        var goal = _goal!;
+        _goal = null;
+        if (!_follower.FinishedNaturally || _playerPosition() is not { } pos)
+        {
+            LastResult = "stopped"; // cancelled (player input), not arrived
+            _log($"[Move] stopped before reaching {goal.Describe()}");
+            return;
+        }
+        LastResult = DescribeEnd(goal, pos);
+        _log($"[Move] route to {goal.Describe()} ended: {LastResult}");
+    }
+
     private void Promote(Task<MeshBroker.PathAnswer> task)
     {
+        _following = false;
         // Carry the classified reason through to the log and the window. "no path" alone
         // reads as a mesh problem whatever went wrong, which is how a dead service spent an
         // evening looking like a doorway that would not path.
@@ -252,8 +299,15 @@ internal sealed class MoveRequest : IDisposable
         LastResult = $"{answer.Waypoints.Count} waypoints";
         _plannedTarget = _goal?.Target ?? answer.Waypoints[^1];
         // ours: stall recovery may re-path it, and its legs are ours to execute (mode switches
-        // and the `land` transition; mount/dismount/teleport are logged, not performed yet)
-        _follower.Move(answer.Waypoints, _fly, _goal?.PlannerTolerance ?? 0, external: false, legs: answer.Legs);
+        // and the `land` transition; mount/dismount/teleport are logged, not performed yet).
+        // Destination tolerance 0 on purpose. The follower measures it against the route's LAST
+        // WAYPOINT, which for an off-mesh goal is the closest reachable point, not the goal:
+        // the Flame Personnel Officer stands 2 y behind the counter edge the route ends at, so
+        // "within 3 y of the end" ended the move up to 5 y from the NPC (SealBreaker,
+        // 2026-09-27). vnavmesh never shows this because its last waypoint is the goal itself.
+        // The range is the goal's, and Update checks it against the target every tick.
+        _follower.Move(answer.Waypoints, _fly, destinationTolerance: 0, external: false, legs: answer.Legs);
+        _following = true;
     }
 
     private void UpdateTeleport()
@@ -313,6 +367,7 @@ internal sealed class MoveRequest : IDisposable
             return false;
         }
         var goal = _goal!;
+        _following = false;
         LastResult = "pathfinding…";
         _log($"[Move] {(_fly ? "fly" : "walk")} to {goal.Describe()}");
         // Hand the range to the planner as a goal tolerance, not just to the follower. An NPC

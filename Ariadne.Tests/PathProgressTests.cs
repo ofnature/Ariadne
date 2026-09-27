@@ -62,6 +62,32 @@ public class PathProgressTests
         Assert.Equal(2, path2.Count); // 5 yalms below → not passed
     }
 
+    [Fact]
+    public void FinalTolerance_AppliesToTheLastWaypointOnly()
+    {
+        // a corner 2 y off the player's track passes on the generous tolerance...
+        var path = Path((10, 0, 2), (20, 0, 0));
+        var done = PathProgress.Advance(path, new Vector3(11, 0, 0), new Vector3(9, 0, 0), 3f, 0, false, finalTolerance: 0.25f);
+        Assert.False(done);
+        Assert.Single(path);
+
+        // ...but the end of the route, 2 y away, does not: it is only passed when we are on it
+        done = PathProgress.Advance(path, new Vector3(18, 0, 0), new Vector3(17, 0, 0), 3f, 0, false, finalTolerance: 0.25f);
+        Assert.False(done);
+        Assert.Single(path);
+
+        done = PathProgress.Advance(path, new Vector3(20.1f, 0, 0), new Vector3(19.9f, 0, 0), 3f, 0, false, finalTolerance: 0.25f);
+        Assert.True(done);
+    }
+
+    [Fact]
+    public void NoFinalTolerance_KeepsTheOldRule()
+    {
+        // externally supplied paths: the last waypoint passes on the same tolerance as any other
+        var path = Path((20, 0, 0));
+        Assert.True(PathProgress.Advance(path, new Vector3(18, 0, 0), new Vector3(17, 0, 0), 3f, 0, false));
+    }
+
     [Theory]
     [InlineData(0, 0, 0, 0, 0, 0, 10, 0, 0, 0)]      // v == a
     [InlineData(5, 0, 0, 0, 0, 0, 10, 0, 0, 0)]      // on the segment

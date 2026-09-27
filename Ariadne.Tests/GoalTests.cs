@@ -60,4 +60,27 @@ public class GoalTests
         Assert.True(goal.IsSatisfied(new Vector3(0, 0, 16)));  // any direction counts
         Assert.Equal(0, goal.PlannerTolerance);
     }
+
+    [Fact]
+    public void DistanceOutside_IsZeroInside_AndTheGapOutside()
+    {
+        var near = new GoalNear(new Vector3(10, 0, 0), 3);
+        Assert.Equal(0, near.DistanceOutside(new Vector3(8, 0, 0)));
+        Assert.Equal(2f, near.DistanceOutside(new Vector3(5, 0, 0)), 3);
+
+        var interact = GoalInteract.For(() => (new Vector3(10, 0, 0), 0.5f), 3.5f)!;
+        Assert.Equal(1f, interact.DistanceOutside(new Vector3(5, 0, 0)), 3);
+
+        var away = new GoalAway(new Vector3(0, 0, 0), 15);
+        Assert.Equal(5f, away.DistanceOutside(new Vector3(10, 0, 0)), 3);
+        Assert.Equal(0, away.DistanceOutside(new Vector3(20, 0, 0)));
+    }
+
+    [Fact]
+    public void DistanceOutside_ExactDestination_IgnoresHeight()
+    {
+        // a spot on the ground: the mesh's height for it is not the caller's
+        var exact = new GoalNear(new Vector3(10, 100, 0), 0);
+        Assert.Equal(0.5f, exact.DistanceOutside(new Vector3(10.5f, 4, 0)), 3);
+    }
 }

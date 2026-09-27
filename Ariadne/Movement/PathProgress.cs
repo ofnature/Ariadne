@@ -13,8 +13,12 @@ internal static class PathProgress
 {
     /// <summary>Removes waypoints already passed. Returns true when the path is finished
     /// (empty, or within destinationTolerance of the final waypoint).</summary>
+    /// <param name="finalTolerance">Pass tolerance for the LAST waypoint only; null = the same
+    /// as every other waypoint. A path whose arrival is judged elsewhere (MoveRequest's goal)
+    /// sets this small, so a generous corner tolerance cannot end the route yalms short of
+    /// its end.</param>
     public static bool Advance(List<Vector3> waypoints, Vector3 playerNow, Vector3? playerPrev,
-        float tolerance, float destinationTolerance, bool ignoreDeltaY)
+        float tolerance, float destinationTolerance, bool ignoreDeltaY, float? finalTolerance = null)
     {
         while (waypoints.Count > 0)
         {
@@ -35,7 +39,8 @@ internal static class PathProgress
                 c.Y = 0;
             }
 
-            if (DistanceToLineSegment(a, b, c) > tolerance)
+            var pass = waypoints.Count == 1 && finalTolerance is { } last ? last : tolerance;
+            if (DistanceToLineSegment(a, b, c) > pass)
                 return false;
 
             waypoints.RemoveAt(0);

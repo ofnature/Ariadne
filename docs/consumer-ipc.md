@@ -54,11 +54,11 @@ poll it instead of try/catching gate calls.
 | `Ariadne.Path.GetTolerance` / `SetTolerance` | `() → float` / `(float)` | waypoint-pass tolerance (default 0.25) |
 | `Ariadne.Path.GetMovementAllowed` / `SetMovementAllowed` | `() → bool` / `(bool)` | pause/resume — path kept, no input written |
 | `Ariadne.SimpleMove.PathfindAndMoveTo` | `(Vector3 dest, bool fly) → bool` | pathfind via Mnemosyne, then follow; false = request rejected (already pathfinding / no player) |
-| `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | stop within `range` |
+| `Ariadne.SimpleMove.PathfindAndMoveCloseTo` | `(Vector3 dest, bool fly, float range) → bool` | stop within `range` **of `dest`** — measured to the target itself, in 3D, not to the route's last waypoint. For an off-mesh target (an NPC behind a counter) the route ends at the closest reachable point; if that is inside `range` the move ends `"goal reached"`, otherwise it walks the whole route and reports how far short it ended |
 | `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending, a teleport leg in flight (movement not started yet), or a zone's flight volume still loading — a `meshNotReady` answer is retried for ~5 s before it is reported |
 | `Ariadne.SimpleMove.PathfindAndMoveToInteract` | `(ulong gameObjectId, bool fly) → bool` | **interact goal**: path to a live object, stop inside interact range (config 3.5y + its hitbox radius); follows it if it wanders (re-paths on >5y drift), keeps the last known spot if it despawns; false = no such object / busy |
 | `Ariadne.SimpleMove.PathfindAndMoveAway` | `(Vector3 from, float distance, bool fly) → bool` | **away goal**: end up ≥ `distance` from `from`, at a reachable mesh point Ariadne picks (ring at the distance, fanning out from the direction away through you); satisfied by distance from `from`, not by reaching the point |
-| `Ariadne.SimpleMove.LastResult` | `() → string` | `"goal reached"`, `"N waypoints"`, `"no path (reason)"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume), `"stuck (Ny short)"`, `"teleporting to X…"`, `"no such object"` |
+| `Ariadne.SimpleMove.LastResult` | `() → string` | While moving: `"pathfinding…"`, `"N waypoints"`, `"teleporting to X…"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume). When it ends: `"goal reached"`; `"closest reachable point, N.Ny short"` (the route was walked to its end and the mesh allows no closer — retrying will not help); `"stuck (Ny short)"` (stall recovery gave up); `"no path (reason)"`; `"stopped"` (cancelled, e.g. by player input); `"zone changed"`; `"no such object"`. A finished move never stays at `"N waypoints"` |
 | `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
 
 Stall recovery is built in, two detectors: hard stall (displacement below threshold —
@@ -68,6 +68,16 @@ current position; attempts are budgeted by ground gained, not by count — a rec
 closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. A consumer
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
+
+**Arrival is the goal's, not the route's** (fixed 2026-09-27, reported by SealBreaker). Paths
+Ariadne computes for `SimpleMove.*` run with a destination tolerance of 0 and end when the
+goal says so, measured against the target. Before this the follower ended the path inside
+`range` of the route's *last waypoint* — for the Flame Personnel Officer that waypoint is the
+counter edge, 2 y from the NPC, so a range of 3 ended the move up to 5 y away. `Path.SetTolerance`
+still governs how corners are passed, but on these paths the final waypoint is only passed
+within 0.25 y, whatever the tolerance: a consumer that sets 3.0 no longer ends every route 3 y
+early. Paths you supply yourself (`Path.MoveTo`, `Path.MoveToWithTolerance`) keep vnavmesh's
+rules unchanged.
 
 **Goals** (Baritone-style, `SimpleMove.*`): every move carries a goal that is checked
 live each tick while following — `MoveCloseTo` is a *near* goal, `MoveToInteract` an

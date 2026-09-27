@@ -12,22 +12,50 @@ directly.
 Ariadne didn't slay anything in the labyrinth — she just made sure the one who did never
 had to rediscover the way. Same job here.
 
-> **Status: v0.1.0, released and installed from the shared listing.** Ariadne runs against the real
+> **Status: v0.1.1, released and installed from the shared listing.** Ariadne runs against the real
 > Mnemosyne service over the pipe — no stub: zone detection, cache seeding, out-of-process builds
 > and the consumer IPC surface are live, and the movement chain has been verified in-game (a
 > character walked a Mnemosyne-computed path with vnavmesh not involved at all). The `vnavmesh.*`
-> gates are claimable by policy, so existing consumers can migrate one feature at a time. Still
-> owed: the `mount` / `dismount` / `jumpOff` leg transitions, and the in-game pass over the
-> `meshNotReady` retry. Per-gate detail: [docs/consumer-ipc.md](docs/consumer-ipc.md).
+> gates are claimable by policy, so existing consumers can migrate one feature at a time. Since the
+> bundle landed the package also **carries the service itself** — v0.1.1 and earlier are the plugin
+> alone. Still owed: the `mount` / `dismount` / `jumpOff` leg transitions, and the in-game pass over
+> the `meshNotReady` retry. Per-gate detail: [docs/consumer-ipc.md](docs/consumer-ipc.md).
 
 ## How it fits together
 
 | Project | Role |
 |---|---|
 | [vnavmesh](https://github.com/awgil/ffxiv_navmesh) | Builds and consumes navmeshes in-game |
-| Mnemosyne | Owns the mesh cache outside the game process; serves and (later) builds meshes |
+| Mnemosyne | Owns the mesh cache outside the game process; serves and builds meshes — shipped inside this package as `service/` |
 | **Ariadne** | In-game bridge: zone detection, cache seeding, consumer IPC |
 | [Theseus](https://github.com/ofnature/Theseus) | Downstream consumer (dungeon running) |
+
+## What's in the package
+
+Ariadne answers nothing without a service on the other end of the pipe, so the release package
+carries one: installing from the listing is the whole install.
+
+| In `latest.zip` | Size | What it is |
+|---|---|---|
+| `Ariadne.dll`, `Ariadne.deps.json`, `Ariadne.json` | ~130 KB | the plugin, flat at the archive root — Dalamud does not find files nested in a folder |
+| `service/` | 95 MB on disk, ~41 MB in the zip | `Mnemosyne.Service.exe` and `Mnemosyne.Cli.exe`, self-contained for win-x64: symbols and doc XML stripped, one shared runtime, no .NET install required |
+
+The payload is **staged, not run where it sits**. On first use Ariadne copies `service/` to
+`%APPDATA%\Mnemosyne\service\<version>\` and launches that copy, because a running service locks its
+own DLLs — one launched out of the plugin folder would block Dalamud's next plugin update from
+replacing them. The copy runs off the game thread, once per bundled version, and a stage that dies
+partway is redone.
+
+A service you built yourself still wins. Autostart resolves in this order:
+
+1. the path in the plugin config (`MnemosyneServicePath`)
+2. the marker `%APPDATA%\Mnemosyne\service.path`, which every service and CLI run rewrites
+3. the bundled payload — staged and launched as described above
+
+So a machine with a hand-built service (or a development checkout) keeps running its own build and
+never pays for the copy, while a fresh install gets a working service with nothing to fetch. The
+payload is produced by [tools/bundle-mnemosyne.sh](tools/bundle-mnemosyne.sh) and verified as part
+of [RELEASING.md](RELEASING.md), which also lists what the build step needs.
 
 ## IPC
 

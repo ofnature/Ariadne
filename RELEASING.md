@@ -1,19 +1,23 @@
 # Releasing Ariadne
 
-Checklist for cutting an Ariadne release. Written 2026-09-19, cutting **v0.1.0** — the first release —
-so the extra steps are marked **[FIRST]**. Everything else is the repeat path.
+Checklist for cutting an Ariadne release. Written 2026-09-19 while cutting **v0.1.0** — the first
+release — so the extra steps are marked **[FIRST]**. Everything else is the repeat path.
+
+**Updated 2026-09-27:** the package now also carries the Mnemosyne service, self-contained
+(step 3), so `latest.zip` went from ~130 KB to ~95 MB. v0.1.1 and earlier are the plugin alone.
 
 ## State when this was written
 
 | Thing | Value |
 | --- | --- |
-| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.0 |
+| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.1 |
 | `AriadnePlugin.PluginVersion` | derived from the assembly version — nothing to edit |
-| `repo.json` (this repo) `AssemblyVersion` | 0.1.0.0 |
-| GitHub releases / tags | v0.1.0 |
-| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.0, visible (`IsHide: false`, `IsTestingExclusive: false`) |
+| `repo.json` (this repo) `AssemblyVersion` | 0.1.1.0 |
+| GitHub releases / tags | v0.1.1 |
+| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.1, visible (`IsHide: false`, `IsTestingExclusive: false`) |
 | Icon at `images/icon.png` on raw | resolves, HTTP 200 — 256×256, 78 KB since 2026-09-26 (was 512×512, 267 KB) |
-| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 123 KB asset |
+| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 131 KB asset |
+| Bundled service in the package | built and staged by step 3 (v0.1.1 and earlier: absent) |
 
 ## The two manifests — which one actually matters
 
@@ -54,12 +58,27 @@ same version — **one edit per file**, because the three `DownloadLink*` point 
 `releases/latest/download/latest.zip` (changed 2026-09-26) rather than at a tag, so there is no URL
 left to forget. A version mismatch makes Dalamud either miss the update or reinstall in a loop.
 
-### 3. Build and test
+### 3. Build, test and bundle
 
 ```bash
 dotnet test Ariadne.Tests/Ariadne.Tests.csproj   # expect 0 failed
-dotnet build Ariadne/Ariadne.csproj -c Release   # expect 0 errors
+bash tools/bundle-mnemosyne.sh                   # expect 95 MB on disk (the zip ends up ~41 MB)
+dotnet build Ariadne/Ariadne.csproj -c Release    # expect 0 errors
 ```
+
+**Run the bundle before the build, and do not skip it.** `tools/bundle-mnemosyne.sh` publishes the
+self-contained service and its CLI into `Ariadne/bin/Release/service/` — the directory DalamudPackager
+zips, from a target that runs `AfterTargets="Build"`. A build without the bundle still succeeds and
+still packages; it just ships a plugin-only zip. That is what CI produces (no Mnemosyne checkout on
+the runner, and it must stay that way), and exactly why step 4 inspects the artifact instead of
+trusting a green tick.
+
+The script wants a Mnemosyne checkout: the sibling `../Mnemosyne`, a path as its argument, or
+`MNEMOSYNE_SRC`. It publishes both projects win-x64 self-contained, deletes the symbols and doc XML
+(63 MB of an 80 MB publish), and writes `service/VERSION` from `ZoneService.AppVersion` plus the
+checkout's commit. Ariadne reads that token to name the stage directory
+(`%APPDATA%\Mnemosyne\service\<version>\`), so an updated payload lands *beside* a running service
+instead of on top of it. Put the Mnemosyne commit in the release notes — the release is a pair.
 
 Ariadne has no `#if DEBUG`-only code today (unlike Argus, whose release must not ship its rating
 learner). If that ever changes, step 4 grows a check on the shipped DLL — `grep -ac "<TypeName>"
@@ -70,12 +89,27 @@ Ariadne.dll` must be 0.
 DalamudPackager emits `Ariadne/bin/Release/Ariadne/latest.zip`. Check the artifact itself:
 
 ```bash
-python -c "import zipfile;z=zipfile.ZipFile(r'D:/Dev/Ariadne/Ariadne/bin/Release/Ariadne/latest.zip');print(z.namelist());print(z.read('Ariadne.json').decode())"
+python -c "
+import zipfile
+z = zipfile.ZipFile(r'D:/Dev/Ariadne/Ariadne/bin/Release/Ariadne/latest.zip')
+n = z.namelist()
+print('root:', [x for x in n if '/' not in x])
+print('service entries:', sum(1 for x in n if x.startswith('service/')))
+print('version:', z.read('service/VERSION').decode().strip())
+print(z.read('Ariadne.json').decode())
+"
 ```
 
-Expect exactly three entries, **flat at the archive root** — `Ariadne.dll`, `Ariadne.deps.json`,
-`Ariadne.json` — and an `AssemblyVersion` matching the bump. Dalamud does not find files nested in a
-folder.
+Expect:
+
+- `Ariadne.dll`, `Ariadne.deps.json`, `Ariadne.json` — **flat at the archive root**, nothing nested;
+  Dalamud does not find files nested in a folder.
+- `service/Mnemosyne.Service.exe` and `service/Mnemosyne.Cli.exe`, ~205 files under `service/`, and
+  `service/VERSION` naming the Mnemosyne commit that went in.
+- An `AssemblyVersion` in `Ariadne.json` matching the bump.
+
+A ~130 KB zip with three entries and no `service/` is a CI artifact, not a release. The bundled one
+is ~41 MB (95 MB of files before compression).
 
 ### 5. Tag and publish
 

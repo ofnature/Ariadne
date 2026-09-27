@@ -18,12 +18,13 @@ public class SyncGateTests
     }
 
     [Fact]
-    public void SlowTask_ReturnsFallback_AndTaskKeepsRunning()
+    public async Task SlowTask_ReturnsFallback_AndTaskKeepsRunning()
     {
         var tcs = new TaskCompletionSource<int>();
         Assert.Equal(-1, SyncGate.Wait(tcs.Task, 50, -1));
         tcs.SetResult(7); // late completion must be harmless (completes into nothing)
-        Assert.Equal(7, tcs.Task.Result);
+        Assert.Equal(7, await tcs.Task); // awaited, not .Result: the task is already complete, but the
+                                         // analyzer is right that blocking reads here are a habit worth not having
     }
 
     [Fact]

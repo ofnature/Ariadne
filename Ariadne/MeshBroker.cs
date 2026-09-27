@@ -457,7 +457,13 @@ internal sealed class MeshBroker : IDisposable
     private async Task<Snapshot> BuildSnapshotAsync(string cacheKey)
     {
         if (_seeder.LocalStatus(cacheKey) == LocalMeshStatus.Current)
+        {
+            // This path doesn't poll, so clear what the last poll left behind: a stale 0..1
+            // otherwise keeps answering Nav.BuildProgress for as long as this zone stays cached
+            // while Nav.IsReady is already true — reporting a build that is demonstrably over.
+            _buildProgress = -1;
             return new Snapshot(cacheKey, ZoneMeshStatus.LocalCurrent, _seeder.TargetPath(cacheKey), DateTime.UtcNow);
+        }
 
         var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
         _buildProgress = status?.Progress ?? -1;

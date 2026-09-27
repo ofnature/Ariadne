@@ -17,11 +17,10 @@ jobs:
   test:
     runs-on: windows-latest
     env:
-      # Dalamud.NET.Sdk's own knob — it must not be `DalamudLibPath`. Sdk.props sets that property
-      # unconditionally on Windows ($(appdata)\XIVLauncher\addon\Hooks\dev\), so an environment
-      # variable of that name is overwritten before the build reads it; a command-line
-      # -p:DalamudLibPath wins instead, which is why only the Test step passed in the first run.
-      # DALAMUD_HOME is read by the SDK, and the SDK appends the separator itself.
+      # The SDK's own knob (Dalamud.NET.Sdk reads DALAMUD_HOME and appends the separator itself).
+      # It only reaches the build because neither csproj pins <DalamudLibPath> any more: a
+      # project-level property beats an environment variable, which is why run #3's job-level
+      # DALAMUD_HOME changed nothing, and why only a command-line -p:DalamudLibPath could move it.
       DALAMUD_HOME: ${{ github.workspace }}/dalamud-dev
     steps:
       - uses: actions/checkout@v4

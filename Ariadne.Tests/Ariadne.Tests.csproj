@@ -8,7 +8,13 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+
+    <!-- This project is a plain Microsoft.NET.Sdk project, so unlike Ariadne.csproj it does not
+         inherit Dalamud.NET.Sdk's default or its DALAMUD_HOME branch. Both are spelled out here so a
+         single environment variable (or -p:) moves the assemblies for the whole solution: without
+         the second line the References below point at bare filenames and resolve to nothing. -->
+    <DalamudLibPath Condition="'$(DALAMUD_HOME)' != ''">$(DALAMUD_HOME)/</DalamudLibPath>
+    <DalamudLibPath Condition="'$(DalamudLibPath)' == ''">$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
   </PropertyGroup>
 
   <ItemGroup>

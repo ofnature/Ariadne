@@ -4,7 +4,6 @@
     <AssemblyName>Ariadne</AssemblyName>
     <RootNamespace>Ariadne</RootNamespace>
     <Version>0.1.0</Version>
-    <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!--

@@ -449,6 +449,15 @@ internal sealed class MainWindow : Window
             }
             ImGui.Unindent();
         }
+        ImGui.SetNextItemWidth(200);
+        var interact = Math.Clamp(_config.InteractRange, 1f, 5f);
+        if (ImGui.SliderFloat("Interact range (yalms)", ref interact, 1f, 5f, "%.1f"))
+        {
+            _config.InteractRange = Math.Clamp(interact, 1f, 5f); // ctrl+click lets a typed value escape the slider's ends
+            _saveConfig();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("How close an interact goal stops: this many yalms from the object's centre, plus its\nhitbox radius. Used by \"Move to target\" and SimpleMove.PathfindAndMoveToInteract.");
         Toggle("Cancel current path on player movement input", () => _config.CancelMoveOnUserInput, v => _config.CancelMoveOnUserInput = v);
         Toggle("Recover from movement stalls", () => _config.DetectStalls, v => _config.DetectStalls = v);
         if (_config.DetectStalls)

@@ -35,6 +35,11 @@ internal sealed class MeshBroker : IDisposable
     public bool MnemosyneConnected => _client.IsConnected;
     public string? MnemosyneApp => _client.ServerApp;
 
+    /// <summary>The build of the service answering the pipe, so the window can name it beside the
+    /// app: a log line alone let a week-old service go unnoticed for a week.</summary>
+    public string? MnemosyneBuildPath => _client.ServerExePath;
+    public string? MnemosyneBuiltAt => _client.ServerBuiltAt;
+
     private readonly MnemosyneClient _client;
     private readonly CacheSeeder _seeder;
     private readonly VnavIpc _vnav;

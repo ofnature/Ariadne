@@ -35,7 +35,8 @@ public class MnemosyneClientTests
         var id = req.GetProperty("id").GetInt32();
         return req.GetProperty("op").GetString() switch
         {
-            "hello" => new { id, ok = true, protocol = 1, app = "test-server", version = "0.0.1", meshVersion = 25 },
+            "hello" => new { id, ok = true, protocol = 1, app = "test-server", version = "0.0.1", meshVersion = 25,
+                exePath = @"D:\Mnemosyne\bin\serve\Release-20260920-005526\Mnemosyne.Service.exe", builtAt = "2026-09-20T00:55:26" },
             "zoneStatus" => new { id, ok = true, status = "cached", version = 25, customization = 0 },
             "getMesh" => new { id, ok = true, path = @"C:\meshes\test.navmesh", version = 25, customization = 0, size = 12345L },
             var op => new { id, ok = false, error = $"unknown op '{op}'" },
@@ -56,6 +57,9 @@ public class MnemosyneClientTests
         Assert.Equal(25, status.Version);
         Assert.True(client.IsConnected);
         Assert.Equal("test-server 0.0.1", client.ServerApp);
+        // which *build* is answering, not just which app: the window names it beside the app
+        Assert.Equal(@"D:\Mnemosyne\bin\serve\Release-20260920-005526\Mnemosyne.Service.exe", client.ServerExePath);
+        Assert.Equal("2026-09-20T00:55:26", client.ServerBuiltAt);
 
         var mesh = await client.GetMeshAsync("some_zone__1F__0__0");
         Assert.NotNull(mesh);
@@ -65,6 +69,37 @@ public class MnemosyneClientTests
 
         client.Dispose();
         await serverTask; // server loop ends when the client closes the pipe
+    }
+
+    [Fact]
+    public async Task AnOlderServer_LeavesTheBuildUnknown()
+    {
+        // a service that predates exePath/builtAt says nothing about which build it is: absent is
+        // unknown, so the window shows the app and no build line rather than inventing one
+        var pipeName = $"ariadne-test-{Guid.NewGuid():N}";
+        var serverTask = ServeOnce(pipeName, req =>
+        {
+            var id = req.GetProperty("id").GetInt32();
+            return req.GetProperty("op").GetString() switch
+            {
+                // the hello a service from before exePath/builtAt existed would send
+                "hello" => new { id, ok = true, protocol = 1, app = "test-server", version = "0.0.1", meshVersion = 25 },
+                "zoneStatus" => new { id, ok = true, status = "cached", version = 25, customization = 0 },
+                var op => new { id, ok = false, error = $"unknown op '{op}'" },
+            };
+        });
+        var warnings = new List<string>();
+        using var client = new MnemosyneClient(_ => { }, warnings.Add, pipeName);
+
+        // the client degrades to null and logs why: surface that reason instead of a bare "was null"
+        var status = await client.ZoneStatusAsync("zone_a"); // forces the connect + hello
+        Assert.True(status != null, "no answer: " + string.Join(" | ", warnings));
+        Assert.Equal("test-server 0.0.1", client.ServerApp);
+        Assert.Null(client.ServerExePath);
+        Assert.Null(client.ServerBuiltAt);
+
+        client.Dispose();
+        await serverTask;
     }
 
     [Fact]
@@ -87,6 +122,7 @@ public class MnemosyneClientTests
         // simulate a server restart: drop the connection client-side, wait for the first
         // server to fully exit (single-instance pipes can't overlap), then serve again
         client.DropForTest();
+        Assert.Null(client.ServerExePath); // a dead connection's build is not the next one's
         await first;
         var second = ServeOnce(pipeName, HandleDefault);
 

@@ -23,6 +23,13 @@ internal sealed class MnemosyneClient : IDisposable
     public bool IsConnected => _pipe?.IsConnected == true;
     public string? ServerApp { get; private set; }
 
+    /// <summary>Which build of the service is answering: the exe path and its write time, from
+    /// `hello` (spec 2026-09-20). Null on a service older than that, and null while disconnected —
+    /// absent means unknown, never a fault. Kept here as well as logged, because the machine ran a
+    /// week-old build for a week with a log line as the only evidence.</summary>
+    public string? ServerExePath { get; private set; }
+    public string? ServerBuiltAt { get; private set; }
+
     private readonly string _pipeName;
     private readonly Action<string> _logInfo;
     private readonly Action<string> _logWarning;
@@ -257,6 +264,8 @@ internal sealed class MnemosyneClient : IDisposable
             }
 
             ServerApp = $"{hello.App} {hello.Version}";
+            ServerExePath = hello.ExePath is { Length: > 0 } ? hello.ExePath : null;
+            ServerBuiltAt = hello.BuiltAt is { Length: > 0 } ? hello.BuiltAt : null;
             _backoff = InitialBackoff;
             _nextConnectAttempt = DateTime.MinValue;
             _logInfo($"[Mnemosyne] Connected to {ServerApp} (protocol {hello.Protocol}, mesh v{hello.MeshVersion})");
@@ -298,6 +307,8 @@ internal sealed class MnemosyneClient : IDisposable
         // was a real bug: it faulted the pusher's fire-and-forget task at 10 Hz and made
         // plugin Dispose fail ("unload error") when the client was torn down mid-outage.
         ServerApp = null;
+        ServerExePath = null;
+        ServerBuiltAt = null;
         try { _writer?.Dispose(); } catch { }
         try { _reader?.Dispose(); } catch { }
         try { _pipe?.Dispose(); } catch { }

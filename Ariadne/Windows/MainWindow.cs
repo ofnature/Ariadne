@@ -27,6 +27,7 @@ internal sealed class MainWindow : Window
     // frame and this touches the disk.
     private DateTime _serviceProbedAt = DateTime.MinValue;
     private string? _serviceExe;
+    private string? _markerExe; // what the marker names — the build the client compares against
     private string _serviceWhyNot = "";
     private bool _servicePipeUp;
 
@@ -87,6 +88,7 @@ internal sealed class MainWindow : Window
 
     public override void Draw()
     {
+        RefreshServiceResolution(); // once a second, whatever tab is showing
         if (!ImGui.BeginTabBar("##tabs"))
             return;
         if (ImGui.BeginTabItem("Status"))
@@ -118,6 +120,9 @@ internal sealed class MainWindow : Window
             ImGui.TextColored(Green, $"connected — {_broker.MnemosyneApp}");
         else
             ImGui.TextColored(Red, "disconnected (start Mnemosyne or the stub; reconnects automatically)");
+
+        if (_broker.MnemosyneConnected && _broker.MnemosyneBuildPath is { } build)
+            DrawRunningBuild(build);
 
         ImGui.TextColored(Grey, "game link");
         ImGui.SameLine(90);
@@ -479,18 +484,11 @@ internal sealed class MainWindow : Window
         }
     }
 
-    /// <summary>Show what autostart would use, and whether it is even needed. Resolving is a
-    /// pair of file reads and starts nothing — the only code that launches is TryLaunch, and
-    /// it runs from the connect path, only when the pipe is absent.</summary>
+    /// <summary>Show what autostart would use, and whether it is even needed — from the values
+    /// RefreshServiceResolution caches once a second, which is also where the "starts nothing"
+    /// reasoning lives.</summary>
     private void DrawServiceResolution()
     {
-        if (DateTime.UtcNow - _serviceProbedAt > TimeSpan.FromSeconds(1))
-        {
-            _serviceProbedAt = DateTime.UtcNow;
-            _serviceExe = ServiceLauncher.ResolveExe(_config.MnemosyneServicePath, out _serviceWhyNot);
-            _servicePipeUp = File.Exists($@"\\.\pipe\{Protocol.PipeName}");
-        }
-
         if (_servicePipeUp)
             ImGui.TextColored(Green, "running — autostart idle");
         else if (_serviceExe != null)
@@ -500,6 +498,41 @@ internal sealed class MainWindow : Window
 
         ImGui.SameLine();
         ImGui.TextColored(Grey, _serviceExe ?? _serviceWhyNot);
+    }
+
+    /// <summary>Resolve what autostart would use — and what the marker names — at most once a
+    /// second: the draw path runs every frame and this touches the disk. Starts nothing; the only
+    /// code that launches a service is ServiceLauncher.TryLaunch, from the connect path, and only
+    /// when the pipe is absent.</summary>
+    private void RefreshServiceResolution()
+    {
+        if (DateTime.UtcNow - _serviceProbedAt <= TimeSpan.FromSeconds(1))
+            return;
+        _serviceProbedAt = DateTime.UtcNow;
+        _serviceExe = ServiceLauncher.ResolveExe(_config.MnemosyneServicePath, out _serviceWhyNot);
+        _markerExe = ServiceLauncher.ResolveExe(null); // the marker alone: what the client compares against
+        _servicePipeUp = File.Exists($@"\\.\pipe\{Protocol.PipeName}");
+    }
+
+    /// <summary>
+    /// Which build is answering, beside the app name. The marker names the build autostart would
+    /// launch, so a mismatch is a half-finished restart — or a fix that is not actually live, which
+    /// is the state that went unnoticed for a week while a log line was its only evidence.
+    /// </summary>
+    private void DrawRunningBuild(string running)
+    {
+        var mismatch = _markerExe is { Length: > 0 } expected
+            && !string.Equals(expected.TrimEnd('\\'), running.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        // the staging folder is what distinguishes two builds of the same service, and it fits
+        var stage = Path.GetDirectoryName(running) is { Length: > 0 } dir ? Path.GetFileName(dir) : running;
+        var line = $"build {stage}{(_broker.MnemosyneBuiltAt is { } at ? $" · {at}" : "")}";
+        ImGui.TextColored(mismatch ? Yellow : Grey, mismatch ? line + " — NOT the marker's build" : line);
+        if (!ImGui.IsItemHovered())
+            return;
+        ImGui.SetTooltip(mismatch
+            ? $"{running}\n\nThe marker autostart reads ({"%APPDATA%"}\\Mnemosyne\\service.path) names:\n"
+              + $"{_markerExe}\n\n`run-service.ps1 -Restart` repoints it and relaunches the service."
+            : $"{running}\n\nThe build of Mnemosyne.Service answering the pipe, as its `hello` reports it.");
     }
 
     private void Toggle(string label, Func<bool> get, Action<bool> set)

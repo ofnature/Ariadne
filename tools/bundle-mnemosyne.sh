@@ -60,7 +60,10 @@ rm -f "$out/createdump.exe"
 # What Ariadne reads to name a stage directory (%APPDATA%\Mnemosyne\service\<version>\): the
 # service's own reported version plus the commit it was built from, so two payloads of the same
 # version are still distinguishable and an update stages beside the running service.
-app_version="$(grep -oP 'AppVersion = "\K[^"]+' "$mnemo/src/Mnemosyne.Service/ZoneService.cs" | head -1)"
+# sed, not grep -P: Perl mode refuses to run outside a UTF-8 locale ("supports only unibyte and
+# UTF-8 locales"), and under `set -e` that ended the script here - payload published, VERSION
+# never written, and a caller piping the output saw no failure at all (release v0.1.2).
+app_version="$(sed -n 's/.*AppVersion = "\([^"]*\)".*//p' "$mnemo/src/Mnemosyne.Service/ZoneService.cs" | head -1)"
 sha="$(git -C "$mnemo" rev-parse --short HEAD)"
 printf '%s+%s\n' "${app_version:-0.0.0}" "$sha" > "$out/VERSION"
 

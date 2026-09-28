@@ -10,14 +10,14 @@ release — so the extra steps are marked **[FIRST]**. Everything else is the re
 
 | Thing | Value |
 | --- | --- |
-| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.1 |
+| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.2 |
 | `AriadnePlugin.PluginVersion` | derived from the assembly version — nothing to edit |
-| `repo.json` (this repo) `AssemblyVersion` | 0.1.1.0 |
-| GitHub releases / tags | v0.1.1 |
-| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.1, visible (`IsHide: false`, `IsTestingExclusive: false`) |
+| `repo.json` (this repo) `AssemblyVersion` | 0.1.2.0 |
+| GitHub releases / tags | v0.1.2 (2026-09-28) |
+| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.2, visible (`IsHide: false`, `IsTestingExclusive: false`) |
 | Icon at `images/icon.png` on raw | resolves, HTTP 200 — 256×256, 78 KB since 2026-09-26 (was 512×512, 267 KB) |
-| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 131 KB asset |
-| Bundled service in the package | built and staged by step 3 (v0.1.1 and earlier: absent) |
+| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 41.6 MB asset (v0.1.2, the first with the service) |
+| Bundled service in the package | built and staged by step 3; v0.1.2 ships Mnemosyne 0.1.0+980a6dc (v0.1.1 and earlier: absent) |
 
 ## The two manifests — which one actually matters
 
@@ -65,6 +65,10 @@ dotnet test Ariadne.Tests/Ariadne.Tests.csproj   # expect 0 failed
 bash tools/bundle-mnemosyne.sh                   # expect 95 MB on disk (the zip ends up ~41 MB)
 dotnet build Ariadne/Ariadne.csproj -c Release    # expect 0 errors
 ```
+
+**Check the bundle's exit status, not its output.** It ends with a `bundled Mnemosyne <version>`
+line; if that line is missing the script stopped early and `service/VERSION` was not written.
+Piping it through `tail` hides the failure, because the pipeline then reports `tail`'s status.
 
 **Run the bundle before the build, and do not skip it.** `tools/bundle-mnemosyne.sh` publishes the
 self-contained service and its CLI into `Ariadne/bin/Release/service/` — the directory DalamudPackager

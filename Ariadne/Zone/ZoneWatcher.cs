@@ -37,9 +37,23 @@ public sealed class ZoneWatcher : IDisposable
 
     private DateTime _retryAt = DateTime.MinValue;
 
-    public ZoneWatcher(IFramework framework)
+    private bool _started;
+
+    public ZoneWatcher(IFramework framework) => _framework = framework;
+
+    /// <summary>
+    /// Begin polling. Separate from construction on purpose: the first poll announces the zone
+    /// the character is standing in, and an announcement nobody is subscribed to yet is lost
+    /// for good — the key does not change again until the next zone. That is what a plugin
+    /// reload looked like until 2026-09-28: the window showed the zone's key, the broker had
+    /// never been told, every path request answered "zone not ready", and only zoning fixed
+    /// it. Subscribe to <see cref="KeyChanged"/> first, then call this.
+    /// </summary>
+    public void Start()
     {
-        _framework = framework;
+        if (_started)
+            return;
+        _started = true;
         _framework.Update += OnUpdate;
     }
 

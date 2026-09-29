@@ -138,6 +138,11 @@ internal static class MainThreadTrace
         while (!_stop)
         {
             Thread.Sleep(200);
+            // Unloading a plugin pauses the whole process for about a second. A watcher that was
+            // asleep when Stop was called wakes from that pause to a heartbeat a second old -
+            // which is the unload, not a freeze. So look again before judging.
+            if (_stop)
+                break;
             var last = Volatile.Read(ref _lastTick);
             if (last == 0)
                 continue; // no tick seen yet

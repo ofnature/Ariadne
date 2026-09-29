@@ -145,8 +145,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         // framework thread, so a tick can land in the middle of this constructor - and both
         // handlers read fields assigned further down. Subscribing early threw a
         // NullReferenceException out of IFramework::Update on load, every load, because
-        // ZoneWatcher hooks Update in its own constructor and fires KeyChanged on the first
-        // tick while _overlay was still null.
+        // ZoneWatcher fires KeyChanged on its first poll and _overlay was still null.
         _zoneWatcher.KeyChanged += _ =>
         {
             var cacheKey = _zoneWatcher.CurrentCacheKey;
@@ -156,6 +155,10 @@ public sealed class AriadnePlugin : IDalamudPlugin
             _move.OnZoneChanged(cacheKey); // ... and so are a running path's
         };
         Framework.Update += OnFrameworkTick;
+        // Only now: its first poll announces the zone we are already standing in, and the
+        // subscription above has to exist to hear it. Started any earlier, a reload left
+        // navigation dead until the next zone change.
+        _zoneWatcher.Start();
 
         Log.Information($"Ariadne v{PluginVersion} loaded (vnav cache: {vnavCacheDir}).");
     }

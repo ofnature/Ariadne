@@ -10,14 +10,14 @@ release — so the extra steps are marked **[FIRST]**. Everything else is the re
 
 | Thing | Value |
 | --- | --- |
-| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.3 |
+| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.4 |
 | `AriadnePlugin.PluginVersion` | derived from the assembly version — nothing to edit |
-| `repo.json` (this repo) `AssemblyVersion` | 0.1.3.0 |
-| GitHub releases / tags | v0.1.3 (2026-09-28, the second release that day) |
-| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.3, visible (`IsHide: false`, `IsTestingExclusive: false`) |
+| `repo.json` (this repo) `AssemblyVersion` | 0.1.4.0 |
+| GitHub releases / tags | v0.1.4 (2026-09-28, the third release that day) |
+| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.4, visible (`IsHide: false`, `IsTestingExclusive: false`) |
 | Icon at `images/icon.png` on raw | resolves, HTTP 200 — 256×256, 78 KB since 2026-09-26 (was 512×512, 267 KB) |
-| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 41.6 MB asset (v0.1.3) |
-| Bundled service in the package | built and staged by step 3; v0.1.2 and v0.1.3 both ship Mnemosyne 0.1.0+980a6dc (v0.1.1 and earlier: absent) |
+| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — verified HTTP 200, 41.6 MB asset (v0.1.4) |
+| Bundled service in the package | built and staged by step 3; v0.1.2 through v0.1.4 all ship Mnemosyne 0.1.0+980a6dc (v0.1.1 and earlier: absent) |
 
 ## The two manifests — which one actually matters
 

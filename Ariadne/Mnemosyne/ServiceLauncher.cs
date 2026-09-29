@@ -194,6 +194,24 @@ internal static class ServiceLauncher
         return true;
     }
 
+    // A zone build runs on every core but two, for tens of seconds to minutes, and on a fresh
+    // machine every zone is a new one. At normal priority that competes with the game for the
+    // CPU exactly when a character has just arrived and started moving. Below normal, Windows
+    // gives the game what it asks for and the build takes what is left: builds finish a little
+    // later, the game does not stutter for them. Path queries are milliseconds either way.
+    private static void YieldToTheGame(Process service, Action<string> log)
+    {
+        try
+        {
+            service.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (Exception ex)
+        {
+            // already exited (lost the single-instance race), or access denied: not worth more than a line
+            log($"[Mnemosyne] could not lower the service's priority: {ex.GetType().Name}");
+        }
+    }
+
     private static bool LaunchOnce(string exe, Action<string> log)
     {
         using var gate = new Mutex(false, @"Global\MnemosyneServiceLaunch");
@@ -219,6 +237,8 @@ internal static class ServiceLauncher
                 CreateNoWindow = true, // service tees its console output to %APPDATA%\Mnemosyne\service.log
             });
             log($"[Mnemosyne] started service: {exe} (pid {proc?.Id.ToString() ?? "?"})");
+            if (proc != null)
+                YieldToTheGame(proc, log);
             return proc != null;
         }
         catch (Exception ex)

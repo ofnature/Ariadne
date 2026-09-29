@@ -134,8 +134,10 @@ internal sealed class MeshBroker : IDisposable
     /// <param name="Legs">The server's multi-modal plan for the same waypoints (null/empty =
     /// single mode, or a legacy server). The follower executes the mode switches and the `land`
     /// transition; a consumer that ignores legs still gets the flat list.</param>
+    /// <param name="StraightTail">The last waypoint is the target itself, added by Ariadne past
+    /// the end of the planner's route (RouteCompletion): the stretch to it is not on the mesh.</param>
     public sealed record PathAnswer(string Result, List<Vector3> Waypoints, Vector3? Nearest, bool Partial,
-        IReadOnlyList<PathLeg>? Legs = null);
+        IReadOnlyList<PathLeg>? Legs = null, bool StraightTail = false);
 
     /// <summary>A reachability window plus the server's account of it (vnavmesh has no
     /// equivalent of this query). `Result` is never empty; the grid arrays are empty unless the

@@ -59,6 +59,11 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// <summary>Trips shorter than this stay on foot (yalms, horizontal).</summary>
     public float FlyMinDistance { get; set; } = 50f;
 
+    /// <summary>When the mesh stops short of the target, walk the rest straight, up to this
+    /// many yalms. It is what gets a character across a crack in the mesh, and what vnavmesh
+    /// does without a limit. 0 turns it off: the move then ends where the mesh does.</summary>
+    public float StraightTailMax { get; set; } = 20f;
+
     /// <summary>Interact goal: arrive within this many yalms of the object's centre plus its
     /// hitbox radius (3.5 is the safe margin Odysseus uses in the field).</summary>
     public float InteractRange { get; set; } = 3.5f;

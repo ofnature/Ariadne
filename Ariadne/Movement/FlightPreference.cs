@@ -35,6 +35,23 @@ internal static class FlightPreference
         }
         return !string.Equals(result, "groundFaster", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// A route with no leg in the air, handed over while the character is flying: come down
+    /// before following it. Without this a ground route was steered as a flight — every waypoint
+    /// a little higher than the feet asked for a takeoff, so the character hopped the whole way,
+    /// overshot the mark, and turned back (Odysseus, 2026-09-29, on "groundFaster" answers).
+    /// </summary>
+    public static bool LandFirst(bool followAsFlight, IReadOnlyList<PathLeg>? legs, bool inFlight)
+    {
+        if (followAsFlight || !inFlight)
+            return false;
+        if (legs is { Count: > 0 })
+            foreach (var leg in legs)
+                if (leg.Mode == LegMode.Fly)
+                    return false;
+        return true;
+    }
 }
 
 /// <summary>

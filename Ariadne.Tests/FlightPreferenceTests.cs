@@ -17,6 +17,20 @@ public class FlightPreferenceTests
     private static PathLeg Leg(LegMode mode, int first, int count, LegTransition? enter = null)
         => new(mode, enter, 0, first, count);
 
+    /// <summary>
+    /// A ground route handed over mid-flight comes down first; one with a flown leg, or while on
+    /// the ground, does not. The hopping this stops: a "groundFaster" answer steered as a flight.
+    /// </summary>
+    [Fact]
+    public void LandFirst_only_for_a_ground_route_while_airborne()
+    {
+        Assert.True(FlightPreference.LandFirst(followAsFlight: false, [Leg(LegMode.Walk, 0, 7)], inFlight: true));
+        Assert.True(FlightPreference.LandFirst(followAsFlight: false, null, inFlight: true));
+        Assert.False(FlightPreference.LandFirst(followAsFlight: false, [Leg(LegMode.Walk, 0, 7)], inFlight: false));
+        Assert.False(FlightPreference.LandFirst(followAsFlight: true, null, inFlight: true));
+        Assert.False(FlightPreference.LandFirst(followAsFlight: false, [Leg(LegMode.Fly, 0, 5), Leg(LegMode.Walk, 5, 3, LegTransition.Land)], inFlight: true));
+    }
+
     [Fact]
     public void NeedsFlight_WhenAnyLegFlies()
     {

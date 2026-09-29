@@ -71,6 +71,7 @@ internal sealed class MoveRequest : IDisposable
     private DateTime? _teleportIdleSince;
     private bool _landed;
     private bool _following; // the follower is running a path we handed it for _goal
+    private bool _tail;      // its last waypoint is the target itself, past the end of the mesh
 
     /// <summary>An exact destination (range 0) counts as reached within this much horizontal
     /// error: the route ends on the mesh's version of the point, not the caller's.</summary>
@@ -419,6 +420,7 @@ internal sealed class MoveRequest : IDisposable
 
         LastResult = $"{answer.Waypoints.Count} waypoints";
         _plannedTarget = _goal?.Target ?? answer.Waypoints[^1];
+        _tail = answer.StraightTail;
         // ours: stall recovery may re-path it, and its legs are ours to execute (mode switches
         // and the `land` transition; mount/dismount/teleport are logged, not performed yet).
         // Destination tolerance 0 on purpose. The follower measures it against the route's LAST
@@ -445,7 +447,11 @@ internal sealed class MoveRequest : IDisposable
         if (_playerPosition() is { } at)
             _log($"[Move] following {answer.Waypoints.Count} waypoints [{answer.Result}]: from {at:f1}, first {answer.Waypoints[0]:f1} "
                 + $"({answer.Waypoints[0].Y - at.Y:+0.0;-0.0}y from your feet), last {answer.Waypoints[^1]:f1}");
-        _follower.Move(answer.Waypoints, _fly, destinationTolerance: 0, external: false, legs: answer.Legs);
+        // Steer it as what it is, not as what was asked for: a fly request the planner answered
+        // with the ground ("groundFaster") is a walk route, and followed as a flight every rising
+        // waypoint was a takeoff attempt — a jump, a glide, a landing, over and over.
+        var flies = FlightPreference.NeedsFlight(answer.Legs, answer.Result, _fly);
+        _follower.Move(answer.Waypoints, flies, destinationTolerance: 0, external: false, legs: answer.Legs);
         _following = true;
     }
 
@@ -530,6 +536,37 @@ internal sealed class MoveRequest : IDisposable
     // is none, say so instead of handing the follower a route through the ground.
     private async Task<MeshBroker.PathAnswer> PlanAsync(Vector3 from, Vector3 to, float? tolerance, bool onTheGround)
     {
+        var answer = await PlanFromTheSurfaceAsync(from, to, tolerance, onTheGround).ConfigureAwait(false);
+        return _fly ? answer : await CompleteAsync(from, to, tolerance ?? 0, answer).ConfigureAwait(false);
+    }
+
+    // The mesh stopped short of the target (RouteCompletion). Get as far as the mesh goes, then
+    // walk the rest straight - within a limit, because the stretch is a guess.
+    private async Task<MeshBroker.PathAnswer> CompleteAsync(Vector3 from, Vector3 to, float range, MeshBroker.PathAnswer answer)
+    {
+        // no route at all, because the target is off the mesh: the planner names the nearest
+        // point that is on it, and that is where the mesh part of the trip ends
+        if (answer.Waypoints.Count == 0 && answer.Result == "targetOffMesh" && answer.Nearest is { } near)
+        {
+            var toNearest = await _broker.FindPathDetailedAsync(from, near, false, null).ConfigureAwait(false);
+            if (toNearest.Waypoints.Count == 0)
+                return answer;
+            _log($"[Move] the target {to:f1} is off the mesh - routing to the nearest point on it, {near:f1}, "
+                + $"{Vector3.Distance(near, to):0.0}y away");
+            answer = toNearest with { Result = "targetOffMesh", Nearest = near, Partial = true };
+        }
+
+        var stoppedShort = answer.Partial || answer.Result == "targetOffMesh";
+        if (!RouteCompletion.ShouldWalkTheRest(answer.Waypoints, to, stoppedShort, _config.StraightTailMax, range))
+            return answer;
+
+        _log($"[Move] the route stops {Vector3.Distance(answer.Waypoints[^1], to):0.0}y short of {to:f1} [{answer.Result}] "
+            + "- walking the rest straight");
+        return answer with { Waypoints = RouteCompletion.WithTail(answer.Waypoints, to), StraightTail = true };
+    }
+
+    private async Task<MeshBroker.PathAnswer> PlanFromTheSurfaceAsync(Vector3 from, Vector3 to, float? tolerance, bool onTheGround)
+    {
         var answer = await _broker.FindPathDetailedAsync(from, to, _fly, tolerance).ConfigureAwait(false);
         if (!onTheGround || RouteSanity.StartOffset(from, answer.Waypoints) is not { } offset)
             return answer;
@@ -581,6 +618,17 @@ internal sealed class MoveRequest : IDisposable
         // Path.StallCount and re-plans with the geometry knowledge it actually has.
         if (_follower.IsExternalPath || _goal == null)
             return;
+
+        // Stalled on the straight stretch past the end of the mesh: something real is in the
+        // way, and a new route would end at the same edge and try the same line. End here.
+        if (_tail && _follower.Waypoints.Count <= 1)
+        {
+            var goal = _goal;
+            _follower.Stop();
+            var result = _playerPosition() is { } here ? DescribeEnd(goal, here) : "stopped";
+            Finish(result, $"[Move] blocked on the stretch past the end of the mesh, toward {goal.Describe()}: {result}");
+            return;
+        }
 
         // Attempts are budgeted by ground gained, not by count: a re-path that closed
         // ProgressMinGain since the last one clears the futility count (Odysseus's rule —

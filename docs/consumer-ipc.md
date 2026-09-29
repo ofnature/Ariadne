@@ -70,6 +70,18 @@ closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. 
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
 
+**When the mesh stops short, the rest is walked straight** (2026-09-29). The meshes are cracked:
+gaps a yalm wide between pieces of ground that is continuous in the game. For moves Ariadne
+plans (`SimpleMove.*` on both surfaces), a route the planner could not finish is completed the
+way vnavmesh completes every route, by adding the target itself as the last waypoint — but only
+when the stretch is at most `StraightTailMax` (config, default 20 y, 0 = off), and not when the
+route already ends inside the goal's range. A target that is off the mesh is routed to the
+nearest point on it first. A stall on the straight stretch ends the move there, with
+`closest reachable point, N.Ny short`; it is not re-planned, since the new route would end at
+the same edge. **`Nav.Pathfind*` is not changed by this**: it returns what the planner returned,
+with `partial` and `result` saying how it ended. A consumer that reads "a route exists" from a
+non-empty answer must also require `partial == false`.
+
 **A walking route begins where the character stands** (2026-09-28). Meshes served by Mnemosyne
 still contain islands nobody can stand on — flat planes under the terrain among them — and the
 planner snaps a position to the nearest poly within five yalms. Where the surface mesh has a

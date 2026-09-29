@@ -455,6 +455,15 @@ internal sealed class MainWindow : Window
                 _saveConfig();
             }
         }
+        ImGui.SetNextItemWidth(120);
+        var tail = _config.StraightTailMax;
+        if (ImGui.InputFloat("Walk straight past the end of the mesh, up to (yalms)", ref tail, 5, 10, "%.0f"))
+        {
+            _config.StraightTailMax = Math.Clamp(tail, 0f, 100f);
+            _saveConfig();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("When the mesh stops short of the target - a crack in it, or a target that is not on it -\nAriadne walks the mesh as far as it goes and then straight at the target, up to this\nfar. A stall on that stretch ends the move there. 0 turns it off: the move ends where\nthe mesh does. vnavmesh does the same with no limit.");
         Toggle("Fly whenever the zone allows it (Ariadne.* moves only)", () => _config.PreferFlying, v => _config.PreferFlying = v);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("A walk request becomes a flight when flight is unlocked in the zone - A Realm Reborn zones\nincluded, once the story has unlocked them - and the trip is long enough. Ariadne calls the\nmount, flies the route, lands, and puts the mount away. Where walking is quicker the planner\nstill answers with the ground route. Never for vnavmesh.* compat calls.");

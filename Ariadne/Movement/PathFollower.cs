@@ -147,6 +147,12 @@ internal sealed class PathFollower : IDisposable
         _legsConsumed = 0;
         _landingHold = false;
         CurrentLeg = "";
+        // A walk route while airborne: land first — the same hold a `land` transition uses.
+        if (FlightPreference.LandFirst(fly, _legs, Service.Condition[ConditionFlag.InFlight]))
+        {
+            _landingHold = true;
+            CurrentLeg = "landing";
+        }
         _stall.Reset();
         _progress.Reset();
         _signal.Set(_waypoints.Count > 0);

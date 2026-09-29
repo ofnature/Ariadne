@@ -442,6 +442,9 @@ internal sealed class MoveRequest : IDisposable
     private void Follow(MeshBroker.PathAnswer answer)
     {
         LastResult = $"{answer.Waypoints.Count} waypoints";
+        if (_playerPosition() is { } at)
+            _log($"[Move] following {answer.Waypoints.Count} waypoints [{answer.Result}]: from {at:f1}, first {answer.Waypoints[0]:f1} "
+                + $"({answer.Waypoints[0].Y - at.Y:+0.0;-0.0}y from your feet), last {answer.Waypoints[^1]:f1}");
         _follower.Move(answer.Waypoints, _fly, destinationTolerance: 0, external: false, legs: answer.Legs);
         _following = true;
     }
@@ -511,10 +514,41 @@ internal sealed class MoveRequest : IDisposable
         // "targetOffMesh", while with one it re-plans to the nearest reachable spot and trims
         // the tail, so the route ends where you can actually interact from. The follower still
         // gets the range too - it decides when to stop walking.
+        // In the air or in the water the character is not at the ground's height, and a route
+        // that starts below it is the expected one.
+        var onTheGround = !_fly && _flight is not ({ IsFlying: true } or { InWater: true });
         _pending = goal is GoalAway away
             ? ResolveAwayAsync(away, from.Value)
-            : _broker.FindPathDetailedAsync(from.Value, goal.Target, _fly, goal.PlannerTolerance > 0 ? goal.PlannerTolerance : null);
+            : PlanAsync(from.Value, goal.Target, goal.PlannerTolerance > 0 ? goal.PlannerTolerance : null, onTheGround);
         return true;
+    }
+
+    private const float SurfaceSearchRadius = 6f;
+
+    // Ask for the route, and check that it begins where the character stands (RouteSanity).
+    // When it begins under the feet, find the surface nearby and plan from there; when there
+    // is none, say so instead of handing the follower a route through the ground.
+    private async Task<MeshBroker.PathAnswer> PlanAsync(Vector3 from, Vector3 to, float? tolerance, bool onTheGround)
+    {
+        var answer = await _broker.FindPathDetailedAsync(from, to, _fly, tolerance).ConfigureAwait(false);
+        if (!onTheGround || RouteSanity.StartOffset(from, answer.Waypoints) is not { } offset)
+            return answer;
+
+        _log($"[Move] the route begins {RouteSanity.Describe(offset)} at {answer.Waypoints[0]:f1}: the mesh has no "
+            + $"surface where you stand ({from:f1}) and the start fell onto another level — looking for the surface nearby");
+        var surface = await _broker.NearestPointAsync(from, SurfaceSearchRadius, RouteSanity.MaxStartOffset, reachableOnly: false)
+            .ConfigureAwait(false);
+        if (surface is { } s && MathF.Abs(s.Y - from.Y) <= RouteSanity.MaxStartOffset)
+        {
+            var retry = await _broker.FindPathDetailedAsync(s, to, _fly, tolerance).ConfigureAwait(false);
+            if (retry.Waypoints.Count > 0 && RouteSanity.StartOffset(from, retry.Waypoints) == null)
+            {
+                _log($"[Move] re-planned from the surface at {s:f1}, {Vector3.Distance(s, from):0.0}y from where you stand");
+                return retry;
+            }
+        }
+        _log("[Move] no surface within reach to plan from — refusing the route that runs on the other level");
+        return new MeshBroker.PathAnswer("startOffSurface", [], surface, false);
     }
 
     // An escape point: on the ring at the wanted distance, starting straight away from the

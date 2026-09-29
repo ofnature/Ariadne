@@ -24,6 +24,9 @@ internal sealed unsafe class FlightControl
     public bool IsMounted => Service.Condition[ConditionFlag.Mounted];
     public bool IsFlying => Service.Condition[ConditionFlag.InFlight];
 
+    /// <summary>Swimming or diving: the character is at the water's height, not the ground's.</summary>
+    public bool InWater => Service.Condition[ConditionFlag.Swimming] || Service.Condition[ConditionFlag.Diving];
+
     /// <summary>Flight is unlocked in this zone and nothing about the character forbids it
     /// right now.</summary>
     public bool CanFlyHere()

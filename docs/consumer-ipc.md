@@ -58,7 +58,7 @@ poll it instead of try/catching gate calls.
 | `Ariadne.SimpleMove.PathfindInProgress` | `() → bool` | pathfind pending, a teleport leg in flight (movement not started yet), or a zone's flight volume still loading — a `meshNotReady` answer is retried for ~5 s before it is reported |
 | `Ariadne.SimpleMove.PathfindAndMoveToInteract` | `(ulong gameObjectId, bool fly) → bool` | **interact goal**: path to a live object, stop inside interact range (config 3.5y + its hitbox radius); follows it if it wanders (re-paths on >5y drift), keeps the last known spot if it despawns; false = no such object / busy |
 | `Ariadne.SimpleMove.PathfindAndMoveAway` | `(Vector3 from, float distance, bool fly) → bool` | **away goal**: end up ≥ `distance` from `from`, at a reachable mesh point Ariadne picks (ring at the distance, fanning out from the direction away through you); satisfied by distance from `from`, not by reaching the point |
-| `Ariadne.SimpleMove.LastResult` | `() → string` | While moving: `"pathfinding…"`, `"N waypoints"`, `"teleporting to X…"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume). When it ends: `"goal reached"`; `"closest reachable point, N.Ny short"` (the route was walked to its end and the mesh allows no closer — retrying will not help); `"stuck (Ny short)"` (stall recovery gave up); `"no path (reason)"`; `"stopped"` (cancelled, e.g. by player input); `"zone changed"`; `"no such object"`. A finished move never stays at `"N waypoints"` |
+| `Ariadne.SimpleMove.LastResult` | `() → string` | While moving: `"pathfinding…"`, `"N waypoints"`, `"teleporting to X…"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume). When it ends: `"goal reached"`; `"closest reachable point, N.Ny short"` (the route was walked to its end and the mesh allows no closer — retrying will not help); `"stuck (Ny short)"` (stall recovery gave up); `"no path (reason)"` (reasons include `startOffSurface`: the route began on another level than the one the character stands on, and no surface was found nearby to plan from); `"stopped"` (cancelled, e.g. by player input); `"zone changed"`; `"no such object"`. A finished move never stays at `"N waypoints"` |
 | `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
 | `Ariadne.SimpleMove.GetPreferFlying` / `SetPreferFlying` | `() → bool` / `(bool)` | fly-when-able on/off for this session (overrides the config toggle) |
 
@@ -69,6 +69,16 @@ current position; attempts are budgeted by ground gained, not by count — a rec
 closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. A consumer
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
+
+**A walking route begins where the character stands** (2026-09-28). Meshes served by Mnemosyne
+still contain islands nobody can stand on — flat planes under the terrain among them — and the
+planner snaps a position to the nearest poly within five yalms. Where the surface mesh has a
+gap, the start can land on a plane underneath and the route runs underground. For `SimpleMove.*`
+Ariadne checks the route's first waypoint against the character's real height: more than 2.5 y
+off, and it looks for the surface within 6 y, re-plans from there, or refuses with
+`no path (startOffSurface)`. Not applied while flying, swimming or diving. **`Nav.Pathfind*`
+returns the planner's answer as it is** — if you follow those waypoints yourself, compare
+`waypoints[0].Y` with the character's before you trust the route.
 
 **Arrival is the goal's, not the route's** (fixed 2026-09-27, reported by SealBreaker; verified in-game the same day at the Hall of Flames counter: range 3 stops within 3 y, `"goal reached"`). Paths
 Ariadne computes for `SimpleMove.*` run with a destination tolerance of 0 and end when the

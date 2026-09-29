@@ -134,7 +134,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open the Ariadne status window. '/ariadne capture' rebuilds this zone from the live layout; '/ariadne aetherytes' lists the zone's crystals as the teleport planner sees them.",
+            HelpMessage = "Open the Ariadne status window. '/ariadne capture' rebuilds this zone from the live layout; '/ariadne aetherytes' lists the zone's crystals as the teleport planner sees them; '/ariadne trace' prints the version and the trace file.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -262,6 +262,15 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             _ = _broker.CaptureCurrentZoneAsync();
             Log.Information("[Ariadne] capture requested for the current zone");
+            return;
+        }
+        // "/ariadne trace": which version this is and where it writes its trace
+        if (args.Trim().Equals("trace", StringComparison.OrdinalIgnoreCase))
+        {
+            var where = MainThreadTrace.FilePath
+                ?? (MainThreadTrace.StartError.Length > 0 ? $"not recording — {MainThreadTrace.StartError}" : "not recording");
+            ChatGui.Print($"[Ariadne] v{PluginVersion}, trace: {where}");
+            Log.Information($"[Ariadne] v{PluginVersion}, trace: {where}");
             return;
         }
         // "/ariadne aetherytes": the zone's crystals as the teleport planner sees them

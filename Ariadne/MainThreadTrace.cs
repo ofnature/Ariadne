@@ -41,6 +41,10 @@ internal static class MainThreadTrace
 
     public static string? FilePath => _path;
 
+    /// <summary>Why there is no trace file, when there is none. A missing file used to be
+    /// indistinguishable from an old version that never wrote one.</summary>
+    public static string StartError { get; private set; } = "";
+
     public static void Start(string directory)
     {
         try
@@ -50,11 +54,13 @@ internal static class MainThreadTrace
             if (File.Exists(_path) && new FileInfo(_path).Length > MaxFileBytes)
                 File.Delete(_path);
         }
-        catch
+        catch (Exception ex)
         {
             _path = null; // tracing is a convenience; never the reason the plugin fails to load
+            StartError = $"{ex.GetType().Name}: {ex.Message}";
             return;
         }
+        StartError = "";
 
         _stop = false;
         Volatile.Write(ref _lastTick, 0);

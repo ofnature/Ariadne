@@ -62,7 +62,10 @@ internal sealed class MainWindow : Window
         MoveRequest move,
         WaypointOverlay overlay,
         Func<Vector3?> playerPosition)
-        : base("Ariadne##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
+        // The version is in the title because it is the first thing anyone is asked when
+        // something goes wrong, and there was nowhere to read it. The id after ## is what ImGui
+        // keys the window on, so the title can change with the version and the layout is kept.
+        : base($"Ariadne v{AriadnePlugin.PluginVersion}##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
         _overlay = overlay;
         _config = config;
@@ -100,6 +103,7 @@ internal sealed class MainWindow : Window
             DrawMovement();
             DrawTimings();
             DrawActivity();
+            DrawTrace();
             ImGui.EndTabItem();
         }
         if (ImGui.BeginTabItem("Config"))
@@ -376,6 +380,28 @@ internal sealed class MainWindow : Window
             ImGui.EndTable();
         }
         ImGui.Separator();
+    }
+
+    private void DrawTrace()
+    {
+        ImGui.Separator();
+        ImGui.TextColored(Grey, "trace");
+        ImGui.SameLine(90);
+        if (MainThreadTrace.FilePath is { } path)
+        {
+            ImGui.TextUnformatted(path);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Copy path"))
+                ImGui.SetClipboardText(path);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("One file per game client. It records any part of Ariadne that held the game's main\nthread for more than 50 ms, every move request, and where the main thread was if the\ngame stopped ticking. Attach it when you report a freeze.");
+        }
+        else
+        {
+            ImGui.TextColored(Red, MainThreadTrace.StartError.Length > 0
+                ? $"not recording — {MainThreadTrace.StartError}"
+                : "not recording");
+        }
     }
 
     private void DrawActivity()

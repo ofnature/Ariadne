@@ -109,7 +109,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
             _teleports, new FlightControl(), m => { Log.Information(m); MainThreadTrace.Note(m); });
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
-            () => _config.SyncGateBudgetMs);
+            () => _config.SyncGateBudgetMs, () => _vnavCompat?.Owned == true);
 
         // Registers nothing until its first Tick, so the window lambdas never run before
         // _mainWindow is assigned.

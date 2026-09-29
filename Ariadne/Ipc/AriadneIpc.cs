@@ -15,11 +15,16 @@ internal sealed class AriadneIpc : IDisposable
     private readonly IDalamudPluginInterface _pluginInterface;
 
     public AriadneIpc(IDalamudPluginInterface pluginInterface, MeshBroker broker, Func<string> currentCacheKey,
-        Movement.PathFollower follower, Movement.MoveRequest move, Func<int> syncBudgetMs)
+        Movement.PathFollower follower, Movement.MoveRequest move, Func<int> syncBudgetMs,
+        Func<bool> servesVnavmesh)
     {
         _pluginInterface = pluginInterface;
 
         RegisterFunc("IsConnected", () => broker.MnemosyneConnected);
+        // True while the vnavmesh.* names are answered by Ariadne (vnavmesh absent, or taken
+        // over). A consumer that keeps vnavmesh as its fallback needs to know: a fallback to
+        // those names then reaches the same planner that just said no, and cannot do better.
+        RegisterFunc("ServesVnavmesh", servesVnavmesh);
         RegisterFunc("CurrentCacheKey", currentCacheKey);
         RegisterFunc("ZoneStatus", () => (int)broker.Current.Status);
         RegisterFunc("RequestMesh", broker.RequestMeshAsync);

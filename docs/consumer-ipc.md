@@ -218,6 +218,13 @@ exactly as before, and a consumer that ignores legs still sees the flat waypoint
 
 ## vnavmesh compatibility mode
 
+**`Ariadne.ServesVnavmesh` `() → bool`** is true while Ariadne is the one answering the
+`vnavmesh.*` names. If your plugin keeps vnavmesh as a fallback for moves Ariadne could not
+route, check this first: when it is true the fallback reaches the same planner and the same
+mesh, so it will give the same answer. Skip it, and walk the partial route or report the move
+as unroutable instead. When it is false, vnavmesh is really there with its own mesh and the
+fallback is a genuine second opinion.
+
 Dalamud IPC names are one global slot each: the last plugin to register wins, and
 unregistering empties the slot whoever filled it. Ariadne therefore manages the
 `vnavmesh.*` names by policy, re-checked every ~2 s (plugin list + an ownership probe),

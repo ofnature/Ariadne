@@ -14,6 +14,7 @@ internal static class SyncGate
 {
     public static T Wait<T>(Task<T> task, int budgetMs, T fallback)
     {
+        using var trace = MainThreadTrace.Enter("sync gate (blocking wait on the service)");
         try
         {
             return task.Wait(budgetMs) ? task.Result : fallback;

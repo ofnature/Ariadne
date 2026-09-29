@@ -85,7 +85,11 @@ internal sealed class MoveRequest : IDisposable
         _pending = null; // don't block unload on a slow pipe; the task completes into nothing
     }
 
-    public bool MoveTo(Vector3 dest, bool fly, float range = 0) => Move(new GoalNear(dest, range), fly);
+    /// <param name="allowTeleport">False for callers that expect vnavmesh's behaviour: the
+    /// vnavmesh.* compat gates. A consumer written against vnavmesh asked for a walk, and a
+    /// teleport cast and a loading screen in the middle of it is not what it planned around.</param>
+    public bool MoveTo(Vector3 dest, bool fly, float range = 0, bool allowTeleport = true)
+        => Move(new GoalNear(dest, range), fly, allowTeleport);
 
     /// <summary>Path to a game object and stop inside interact range (config.InteractRange +
     /// its hitbox), following it if it wanders.</summary>
@@ -103,8 +107,9 @@ internal sealed class MoveRequest : IDisposable
     /// <summary>Get at least <paramref name="distance"/> away from a point, to a reachable spot.</summary>
     public bool MoveAway(Vector3 from, float distance, bool fly) => Move(new GoalAway(from, distance), fly);
 
-    public bool Move(IGoal goal, bool fly)
+    public bool Move(IGoal goal, bool fly, bool allowTeleport = true)
     {
+        using var trace = MainThreadTrace.Enter("move request");
         if (TaskInProgress)
         {
             _log("[Move] request already in progress");
@@ -125,7 +130,7 @@ internal sealed class MoveRequest : IDisposable
 
         // Teleport leg first when a crystal wins on ETA. Ariadne's own surface only — the
         // vnavmesh.* compat gates never reach here with aetherytes on. Escapes never teleport.
-        if (UseAetherytes && _teleports != null && goal is not GoalAway)
+        if (allowTeleport && UseAetherytes && _teleports != null && goal is not GoalAway)
         {
             if (_teleports.TryPlan(from.Value, goal.Target, fly, out var why) is { } plan)
             {
@@ -141,7 +146,7 @@ internal sealed class MoveRequest : IDisposable
                 }
                 _log($"[Move] Lifestream declined the teleport to {plan.Name} — going direct");
             }
-            else
+            else if (why.Length > 0)
             {
                 _log($"[Move] no teleport leg: {why}");
             }

@@ -95,6 +95,12 @@ areas, for an away goal, or for `vnavmesh.*` compat calls. Without Lifestream lo
 there are simply no teleport legs. Same-zone aetherytes only; cross-zone travel stays
 the consumer's job until Mnemosyne's planner emits teleport legs.
 
+The `vnavmesh.*` compat gates pass through without ever planning a teleport (enforced in code
+since 2026-09-28; before that the rule was documented but not applied). A trip too short for any
+crystal to pay is decided on arithmetic alone, and the character's attunements are read at most
+once every 30 s: reading them makes the game rebuild its teleport list, and the first version
+did that over two hundred times per move request, which froze the client for about a second.
+
 **Recovery applies only to paths Ariadne computed itself** (`SimpleMove.*`). A path you
 supplied via `Path.MoveTo` is never mesh-re-pathed — your waypoints may encode knowledge
 the mesh lacks (danger-aware dodge corners), so on a stall Ariadne keeps following them

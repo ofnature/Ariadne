@@ -55,6 +55,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         pluginInterface.Create<Service>();
 
         _config = PluginInterface.GetPluginConfig() as AriadneConfig ?? new AriadneConfig();
+        MainThreadTrace.Start(PluginInterface.ConfigDirectory.FullName);
 
         // vnavmesh's meshcache is a sibling of our own config directory
         var vnavCacheDir = Path.Combine(
@@ -68,10 +69,11 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => _config.AutoSeed, () => _config.BuildOnMiss,
             cacheKey => Framework.RunOnFrameworkThread(() =>
             {
+                using var trace = MainThreadTrace.Enter("scene capture");
                 try { return SceneCapture.CaptureActive(cacheKey); }
                 catch (Exception ex) { Log.Warning($"Scene capture failed: {ex.Message}"); return null; }
             }),
-            m => Log.Information(m));
+            m => { Log.Information(m); MainThreadTrace.Note(m); });
 
         // Two pipelines can be measured now, and each is recorded when it answers: vnavmesh's own
         // build or cache load (the milestone-5 comparison) and Ariadne's, whose number is the one
@@ -101,16 +103,10 @@ public sealed class AriadnePlugin : IDalamudPlugin
                 || Condition[ConditionFlag.RidingPillion] || Condition[ConditionFlag.BetweenAreas],
             () => Condition[ConditionFlag.Casting] || Condition[ConditionFlag.BetweenAreas]
                 || Condition[ConditionFlag.BetweenAreas51],
-            () =>
-            {
-                var ids = new List<uint>();
-                foreach (var e in AetheryteList)
-                    ids.Add(e.AetheryteId);
-                return ids;
-            });
+            ReadAttunedAetherytes);
         _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position,
             id => ObjectTable.SearchById(id) is { } o ? (o.Position, o.HitboxRadius) : null,
-            _teleports, m => Log.Information(m));
+            _teleports, m => { Log.Information(m); MainThreadTrace.Note(m); });
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
             () => _config.SyncGateBudgetMs);
@@ -132,8 +128,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         // eats a try/catch because gate calls throw when a plugin is absent; shared data doesn't)
         _navReadyShared = PluginInterface.GetOrCreateData<bool[]>("ariadne.NavReady", () => [false]);
 
-        PluginInterface.UiBuilder.Draw += _overlay.Draw;
-        PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
+        PluginInterface.UiBuilder.Draw += Draw;
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi += OpenMain;
 
@@ -170,8 +165,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandMain);
         CommandManager.RemoveHandler(CommandShort);
         Framework.Update -= OnFrameworkTick;
-        PluginInterface.UiBuilder.Draw -= _overlay.Draw;
-        PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
+        PluginInterface.UiBuilder.Draw -= Draw;
         _dtr.Dispose();
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
@@ -185,17 +179,43 @@ public sealed class AriadnePlugin : IDalamudPlugin
         PluginInterface.RelinquishData("ariadne.NavReady");
         _zoneWatcher.Dispose();
         _broker.Dispose(); // disposes the pipe client
+        MainThreadTrace.Stop();
     }
 
     private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework fwk)
     {
-        _tracker.Tick();
-        _vnavCompat.Tick();
-        _pusher.Tick();
-        _follower.Update(fwk);
-        _move.Update();
-        _dtr.Update();
+        MainThreadTrace.Heartbeat();
+        using (MainThreadTrace.Enter("ready tracker")) _tracker.Tick();
+        using (MainThreadTrace.Enter("compat gate policy")) _vnavCompat.Tick();
+        using (MainThreadTrace.Enter("game state push")) _pusher.Tick();
+        using (MainThreadTrace.Enter("path follower")) _follower.Update(fwk);
+        using (MainThreadTrace.Enter("move request update")) _move.Update();
+        using (MainThreadTrace.Enter("dtr entry")) _dtr.Update();
         _navReadyShared[0] = _broker.MnemosyneConnected && _broker.NavIsReady;
+    }
+
+    private void Draw()
+    {
+        using (MainThreadTrace.Enter("waypoint overlay")) _overlay.Draw();
+        using (MainThreadTrace.Enter("window")) _windowSystem.Draw();
+    }
+
+    // The character's attuned aetherytes, with ONE rebuild of the game's teleport list.
+    // Dalamud's IAetheryteList rebuilds it on every Length read, and its enumerator reads
+    // Length per entry: a foreach over 108 crystals made the game rebuild the list over two
+    // hundred times, on the main thread, for every single move request (found 2026-09-28,
+    // when one client kept freezing during moves). TeleportService caches what this returns.
+    private static unsafe IReadOnlyCollection<uint> ReadAttunedAetherytes()
+    {
+        var ids = new List<uint>();
+        var telepo = FFXIVClientStructs.FFXIV.Client.Game.UI.Telepo.Instance();
+        if (telepo == null || ObjectTable.LocalPlayer == null)
+            return ids; // reading the list without a character crashes the game
+        telepo->UpdateAetheryteList();
+        var count = telepo->TeleportList.Count;
+        for (var i = 0; i < count; i++)
+            ids.Add(telepo->TeleportList[i].AetheryteId);
+        return ids;
     }
 
     // Runs on the framework thread (safe to touch game state); null while loading or logged out.

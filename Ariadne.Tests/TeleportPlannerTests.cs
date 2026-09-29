@@ -52,4 +52,32 @@ public class TeleportPlannerTests
     {
         Assert.Null(TeleportPlanner.Choose(Player, new Vector3(900, 0, 0), false, [], Cost, MinSaving));
     }
+
+    [Theory]
+    // walking 6 y/s, cost 12 s, saving 5 s: a trip has to be 17 s (102 y) before any crystal can pay
+    [InlineData(101f, false, false)]
+    [InlineData(103f, false, true)]
+    // flying 20 y/s: 340 y
+    [InlineData(339f, true, false)]
+    [InlineData(341f, true, true)]
+    public void CanPay_IsDecidedByTheTripAlone(float distance, bool fly, bool expected)
+    {
+        Assert.Equal(expected, TeleportPlanner.CanPay(Player, new Vector3(distance, 0, 0), fly, Cost, MinSaving));
+    }
+
+    [Fact]
+    public void CanPay_NeverRulesOutATripTheFullRuleWouldTake()
+    {
+        // the best case for a teleport is a crystal standing on the goal: if even that does
+        // not pay, nothing does - so the cheap check can only say no when Choose would too
+        for (var d = 10f; d < 600f; d += 7f)
+        {
+            var goal = new Vector3(d, 0, 0);
+            foreach (var fly in new[] { false, true })
+            {
+                var chosen = TeleportPlanner.Choose(Player, goal, fly, [(1u, goal)], Cost, MinSaving) != null;
+                Assert.Equal(chosen, TeleportPlanner.CanPay(Player, goal, fly, Cost, MinSaving));
+            }
+        }
+    }
 }

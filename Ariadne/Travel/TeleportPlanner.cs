@@ -36,6 +36,13 @@ internal static class TeleportPlanner
         return best != null && direct - best.ViaSeconds >= minSavingSeconds ? best : null;
     }
 
+    /// <summary>Whether a teleport could win at all: even a crystal standing ON the goal costs
+    /// the teleport itself, so a trip shorter than cost + saving can never pay. Asked before
+    /// anything else is looked up — most moves are short, and the attunement list is not free
+    /// to read.</summary>
+    public static bool CanPay(Vector3 player, Vector3 goal, bool fly, float teleportCostSeconds, float minSavingSeconds)
+        => Horizontal(player, goal) / (fly ? FlySpeed : WalkSpeed) - teleportCostSeconds >= minSavingSeconds;
+
     /// <summary>XZ distance: marker-placed aetherytes have no height, and travel time is
     /// about ground covered anyway.</summary>
     public static float Horizontal(Vector3 a, Vector3 b)

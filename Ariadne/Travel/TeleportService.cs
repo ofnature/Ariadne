@@ -18,6 +18,13 @@ internal sealed class TeleportService
     private readonly Func<bool> _blocked;
     private readonly Func<bool> _inTransit;
     private readonly Func<IReadOnlyCollection<uint>> _attunedIds;
+    private HashSet<uint> _attuned = [];
+    private DateTime _attunedAt = DateTime.MinValue;
+
+    /// <summary>How long a read of the character's attunements is trusted. They change when a
+    /// crystal is attuned, which is rare; reading them makes the game rebuild its teleport
+    /// list, which is not something to do per move.</summary>
+    public static readonly TimeSpan AttunedTtl = TimeSpan.FromSeconds(30);
 
     /// <param name="blocked">Teleporting is impossible or unwanted right now: in a duty, in
     /// combat, on a quest vehicle, between areas.</param>
@@ -46,12 +53,16 @@ internal sealed class TeleportService
             why = "blocked (duty, combat, quest vehicle, or between areas)";
             return null;
         }
+        // too short for any crystal to pay: decided on arithmetic alone, and silently — this
+        // is the answer for most moves, and none of them is worth a log line
+        if (!TeleportPlanner.CanPay(player, goal, fly, _config.TeleportCostSeconds, _config.TeleportMinSavingSeconds))
+            return null;
         if (!_lifestream.IsAvailable)
         {
             why = "Lifestream is not loaded";
             return null;
         }
-        var attuned = new HashSet<uint>(_attunedIds());
+        var attuned = Attuned();
         var candidates = new List<(uint, Vector3)>();
         var names = new Dictionary<uint, string>();
         var inZone = 0;
@@ -90,7 +101,8 @@ internal sealed class TeleportService
     public IEnumerable<string> Describe(Vector3 player)
     {
         yield return $"territory {_territory()}, Lifestream {(_lifestream.IsAvailable ? "loaded" : "NOT loaded")}, blocked={_blocked()}";
-        var attuned = new HashSet<uint>(_attunedIds());
+        _attunedAt = DateTime.MinValue; // an explicit look wants what is true now
+        var attuned = Attuned();
         yield return $"{attuned.Count} attuned aetherytes anywhere, {_catalog.Count} placed in the catalog";
         var any = false;
         foreach (var e in _catalog.InTerritory(_territory()))
@@ -100,6 +112,17 @@ internal sealed class TeleportService
         }
         if (!any)
             yield return "  (no aetheryte placed in this territory)";
+    }
+
+    private HashSet<uint> Attuned()
+    {
+        if (DateTime.UtcNow - _attunedAt > AttunedTtl)
+        {
+            using var _ = MainThreadTrace.Enter("reading attuned aetherytes");
+            _attuned = new HashSet<uint>(_attunedIds());
+            _attunedAt = DateTime.UtcNow;
+        }
+        return _attuned;
     }
 
     public bool Start(uint aetheryteId) => _lifestream.Teleport(aetheryteId);

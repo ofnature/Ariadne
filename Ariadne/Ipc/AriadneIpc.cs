@@ -126,6 +126,9 @@ internal sealed class AriadneIpc : IDisposable
         // teleport legs (Lifestream): per-session override of the config toggle
         RegisterFunc("SimpleMove.GetUseAetherytes", () => move.UseAetherytes);
         RegisterAction("SimpleMove.SetUseAetherytes", (bool v) => move.UseAetherytesOverride = v);
+        // fly when the zone allows it, even for a walk request: per-session override of the config toggle
+        RegisterFunc("SimpleMove.GetPreferFlying", () => move.PreferFlying);
+        RegisterAction("SimpleMove.SetPreferFlying", (bool v) => move.PreferFlyingOverride = v);
     }
 
     public void Dispose()

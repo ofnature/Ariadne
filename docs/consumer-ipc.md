@@ -60,6 +60,7 @@ poll it instead of try/catching gate calls.
 | `Ariadne.SimpleMove.PathfindAndMoveAway` | `(Vector3 from, float distance, bool fly) → bool` | **away goal**: end up ≥ `distance` from `from`, at a reachable mesh point Ariadne picks (ring at the distance, fanning out from the direction away through you); satisfied by distance from `from`, not by reaching the point |
 | `Ariadne.SimpleMove.LastResult` | `() → string` | While moving: `"pathfinding…"`, `"N waypoints"`, `"teleporting to X…"`, `"waiting for mesh"` (retrying a `meshNotReady` zone volume). When it ends: `"goal reached"`; `"closest reachable point, N.Ny short"` (the route was walked to its end and the mesh allows no closer — retrying will not help); `"stuck (Ny short)"` (stall recovery gave up); `"no path (reason)"`; `"stopped"` (cancelled, e.g. by player input); `"zone changed"`; `"no such object"`. A finished move never stays at `"N waypoints"` |
 | `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
+| `Ariadne.SimpleMove.GetPreferFlying` / `SetPreferFlying` | `() → bool` / `(bool)` | fly-when-able on/off for this session (overrides the config toggle) |
 
 Stall recovery is built in, two detectors: hard stall (displacement below threshold —
 frozen against a wall) and soft stall (not closing on the destination — the ±4y
@@ -84,6 +85,21 @@ live each tick while following — `MoveCloseTo` is a *near* goal, `MoveToIntera
 *interact* goal, `MoveAway` an *away* goal. A satisfied goal ends the path early
 (`LastResult` = `"goal reached"`); a plain `MoveTo` (range 0) is only ended by the
 follower reaching the last waypoint.
+
+**Fly when able** (config "Fly whenever the zone allows it", default off, or `SetPreferFlying`):
+a move asked for as a walk becomes a flight when flight is unlocked in the current zone and the
+trip is at least the configured distance (default 50 y). "Unlocked" is the game's own answer for
+the territory's aether current set, which covers A Realm Reborn zones once the story has
+unlocked them. Ariadne then does the whole trip itself: it calls the mount (mount roulette), flies
+the route, lands at its end, and puts the mount away again — `PathfindInProgress` stays true until
+the character is back on foot, so a consumer that waits on it can interact straight away. While
+in the air on a mount Ariadne called, a ranged goal does not end the move overhead: the route is
+flown to its end on the ground first. Where walking is quicker the planner answers with the
+ground route and no mount is called. If the mount will not come out within 8 s the move falls
+back to walking. A flight the caller asked for itself (`fly: true`) also gets the mount called
+when the character is on foot, but keeps the mount at the end — that caller manages its own.
+Never in a duty, in combat, on a quest vehicle, for an away goal, or for `vnavmesh.*` compat calls.
+`LastResult` reads `"calling the mount…"` while it waits.
 
 **Teleport legs** (config "Use aetherytes when they save time", default off, or
 `SetUseAetherytes`): before pathing, Ariadne compares the ETA of going directly (6 y/s

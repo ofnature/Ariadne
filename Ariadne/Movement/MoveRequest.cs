@@ -14,12 +14,23 @@ namespace Ariadne.Movement;
 // retry loop are the new parts.
 internal sealed class MoveRequest : IDisposable
 {
-    public bool TaskInProgress => _pending != null || _teleport != null || _meshWait.Waiting;
+    public bool TaskInProgress => _pending != null || _teleport != null || _meshWait.Waiting
+        || _held != null || _dismounting;
     public string LastResult { get; private set; } = "";
     public int RetriesUsed { get; private set; }
 
     /// <summary>"teleporting to X…" while a teleport leg is in flight; "" otherwise.</summary>
     public string TeleportStatus => _teleport is { } t ? $"teleporting to {t.Name}…" : "";
+
+    /// <summary>What the move is doing while nothing is being followed yet, for the window.</summary>
+    public string PhaseText => _teleport != null ? TeleportStatus
+        : _held != null ? "calling the mount…"
+        : _dismounting ? "putting the mount away…"
+        : "pathfinding…";
+
+    /// <summary>Per-session override of config.PreferFlying (set over IPC); null = config.</summary>
+    public bool? PreferFlyingOverride { get; set; }
+    public bool PreferFlying => PreferFlyingOverride ?? _config.PreferFlying;
 
     /// <summary>Per-session override of config.UseAetherytes (set over IPC); null = config.</summary>
     public bool? UseAetherytesOverride { get; set; }
@@ -36,7 +47,18 @@ internal sealed class MoveRequest : IDisposable
     private readonly Func<Vector3?> _playerPosition;
     private readonly Func<ulong, (Vector3 Position, float HitboxRadius)?> _resolveObject;
     private readonly TeleportService? _teleports;
+    private readonly FlightControl? _flight;
     private readonly Action<string> _log;
+
+    private static readonly TimeSpan LandingGrace = TimeSpan.FromSeconds(2); // let the descent finish before dismounting
+    private readonly BudgetedRetry _mount = new(TimeSpan.FromMilliseconds(700), TimeSpan.FromSeconds(8));
+    private readonly BudgetedRetry _dismount = new(TimeSpan.FromMilliseconds(700), TimeSpan.FromSeconds(8));
+    private MeshBroker.PathAnswer? _held; // a route with a leg in the air, waiting for the mount
+    private bool _smart;        // the caller is Ariadne's own surface: teleports and flight are allowed
+    private bool _upgraded;     // asked for a walk, flying instead
+    private bool _mountedByUs;  // so only a mount we called is put away
+    private bool _dismounting;
+    private DateTime _dismountSince;
 
     private readonly FutilityCounter _futility;
     private Task<MeshBroker.PathAnswer>? _pending;
@@ -66,8 +88,10 @@ internal sealed class MoveRequest : IDisposable
     private string _zone = ""; // the territory the current plan's coordinates belong to
 
     public MoveRequest(MeshBroker broker, PathFollower follower, AriadneConfig config, Func<Vector3?> playerPosition,
-        Func<ulong, (Vector3 Position, float HitboxRadius)?> resolveObject, TeleportService? teleports, Action<string> log)
+        Func<ulong, (Vector3 Position, float HitboxRadius)?> resolveObject, TeleportService? teleports,
+        FlightControl? flight, Action<string> log)
     {
+        _flight = flight;
         _broker = broker;
         _follower = follower;
         _config = config;
@@ -85,11 +109,11 @@ internal sealed class MoveRequest : IDisposable
         _pending = null; // don't block unload on a slow pipe; the task completes into nothing
     }
 
-    /// <param name="allowTeleport">False for callers that expect vnavmesh's behaviour: the
-    /// vnavmesh.* compat gates. A consumer written against vnavmesh asked for a walk, and a
-    /// teleport cast and a loading screen in the middle of it is not what it planned around.</param>
-    public bool MoveTo(Vector3 dest, bool fly, float range = 0, bool allowTeleport = true)
-        => Move(new GoalNear(dest, range), fly, allowTeleport);
+    /// <param name="smart">False for callers that expect vnavmesh's behaviour: the vnavmesh.*
+    /// compat gates. A consumer written against vnavmesh asked for a walk; a teleport cast, a
+    /// loading screen or a mount appearing in the middle of it is not what it planned around.</param>
+    public bool MoveTo(Vector3 dest, bool fly, float range = 0, bool smart = true)
+        => Move(new GoalNear(dest, range), fly, smart);
 
     /// <summary>Path to a game object and stop inside interact range (config.InteractRange +
     /// its hitbox), following it if it wanders.</summary>
@@ -107,7 +131,7 @@ internal sealed class MoveRequest : IDisposable
     /// <summary>Get at least <paramref name="distance"/> away from a point, to a reachable spot.</summary>
     public bool MoveAway(Vector3 from, float distance, bool fly) => Move(new GoalAway(from, distance), fly);
 
-    public bool Move(IGoal goal, bool fly, bool allowTeleport = true)
+    public bool Move(IGoal goal, bool fly, bool smart = true)
     {
         using var trace = MainThreadTrace.Enter("move request");
         if (TaskInProgress)
@@ -126,11 +150,24 @@ internal sealed class MoveRequest : IDisposable
         _meshWait.Reset();
         _futility.Reset();
         _goal = goal;
+        _smart = smart;
+        _upgraded = false;
+        _mountedByUs = false;
+
+        // Fly when the zone allows it, whatever was asked for. Decided before the teleport
+        // leg, because how long the direct trip takes depends on how it is travelled.
+        if (smart && !fly && PreferFlying && _flight != null && goal is not GoalAway
+            && FlightPreference.ShouldUpgrade(TeleportPlanner.Horizontal(from.Value, goal.Target), _config.FlyMinDistance, _flight.CanFlyHere()))
+        {
+            fly = true;
+            _upgraded = true;
+            _log($"[Move] flight is unlocked here and {goal.Describe()} is {TeleportPlanner.Horizontal(from.Value, goal.Target):0}y away — flying instead of walking");
+        }
         _fly = fly;
 
         // Teleport leg first when a crystal wins on ETA. Ariadne's own surface only — the
         // vnavmesh.* compat gates never reach here with aetherytes on. Escapes never teleport.
-        if (allowTeleport && UseAetherytes && _teleports != null && goal is not GoalAway)
+        if (smart && UseAetherytes && _teleports != null && goal is not GoalAway)
         {
             if (_teleports.TryPlan(from.Value, goal.Target, fly, out var why) is { } plan)
             {
@@ -164,6 +201,8 @@ internal sealed class MoveRequest : IDisposable
         _pending = null;
         _goal = null;
         _following = false;
+        _held = null;
+        _dismounting = false; // stopped by hand: the mount is the player's to keep or put away
         _meshWait.Reset();
         _follower.Stop();
     }
@@ -206,6 +245,17 @@ internal sealed class MoveRequest : IDisposable
             return;
         }
 
+        if (_held != null)
+        {
+            UpdateMounting();
+            return;
+        }
+        if (_dismounting)
+        {
+            UpdateDismounting();
+            return;
+        }
+
         if (_pending is { IsCompleted: true } task)
         {
             _pending = null;
@@ -239,13 +289,14 @@ internal sealed class MoveRequest : IDisposable
         }
         if (_playerPosition() is not { } pos)
             return;
-        if (_goal.IsSatisfied(pos))
+        // In the air on a mount we called, the range is met overhead long before the ground is:
+        // fly the route to its end, which is on the ground, rather than dropping out of the sky.
+        var overhead = _mountedByUs && _flight is { IsFlying: true };
+        if (!overhead && _goal.IsSatisfied(pos))
         {
             _follower.Stop();
-            LastResult = "goal reached";
-            _log($"[Move] goal reached: {_goal.Describe()}");
-            _goal = null;
-            _following = false;
+            var reached = _goal;
+            Finish("goal reached", $"[Move] goal reached: {reached.Describe()}");
             return;
         }
         var drift = Vector3.Distance(_goal.Target, _plannedTarget);
@@ -270,8 +321,73 @@ internal sealed class MoveRequest : IDisposable
             _log($"[Move] stopped before reaching {goal.Describe()}");
             return;
         }
-        LastResult = DescribeEnd(goal, pos);
-        _log($"[Move] route to {goal.Describe()} ended: {LastResult}");
+        var result = DescribeEnd(goal, pos);
+        Finish(result, $"[Move] route to {goal.Describe()} ended: {result}");
+    }
+
+    // Arrived, one way or the other. A mount we called for a caller that asked to walk is put
+    // away again: it expects to be on foot when the move reports done, and TaskInProgress
+    // stays true until it is.
+    private void Finish(string result, string logLine)
+    {
+        LastResult = result;
+        _log(logLine);
+        _goal = null;
+        _following = false;
+        if (_upgraded && _mountedByUs && _flight is { IsMounted: true })
+        {
+            _dismounting = true;
+            _dismountSince = DateTime.UtcNow;
+            _dismount.Reset();
+        }
+    }
+
+    // The route has a leg in the air and the character is on foot: the mount first.
+    private void UpdateMounting()
+    {
+        var held = _held!;
+        if (_flight!.IsMounted)
+        {
+            _held = null;
+            _mountedByUs = true;
+            Follow(held);
+            return;
+        }
+        var now = DateTime.UtcNow;
+        if (_mount.Due(now))
+        {
+            _flight.TryMount();
+        }
+        else if (_mount.GaveUp)
+        {
+            _held = null;
+            _log("[Move] the mount would not come out — walking instead");
+            _fly = false;
+            _upgraded = false;
+            Request();
+        }
+    }
+
+    private void UpdateDismounting()
+    {
+        if (!_flight!.IsMounted)
+        {
+            _dismounting = false;
+            _mountedByUs = false;
+            return;
+        }
+        var now = DateTime.UtcNow;
+        if (_flight.IsFlying && now - _dismountSince < LandingGrace)
+            return; // still coming down: dismounting in the air is a fall
+        if (_dismount.Due(now))
+        {
+            _flight.TryDismount();
+        }
+        else if (_dismount.GaveUp)
+        {
+            _dismounting = false;
+            _log("[Move] the mount would not go away — leaving it out");
+        }
     }
 
     private void Promote(Task<MeshBroker.PathAnswer> task)
@@ -311,6 +427,21 @@ internal sealed class MoveRequest : IDisposable
         // "within 3 y of the end" ended the move up to 5 y from the NPC (SealBreaker,
         // 2026-09-27). vnavmesh never shows this because its last waypoint is the goal itself.
         // The range is the goal's, and Update checks it against the target every tick.
+        if (_smart && _flight != null && !_flight.IsMounted
+            && FlightPreference.NeedsFlight(answer.Legs, answer.Result, _fly))
+        {
+            _held = answer;
+            _mount.Reset();
+            LastResult = "calling the mount…";
+            _log($"[Move] the route to {_goal?.Describe()} flies — calling the mount first");
+            return;
+        }
+        Follow(answer);
+    }
+
+    private void Follow(MeshBroker.PathAnswer answer)
+    {
+        LastResult = $"{answer.Waypoints.Count} waypoints";
         _follower.Move(answer.Waypoints, _fly, destinationTolerance: 0, external: false, legs: answer.Legs);
         _following = true;
     }

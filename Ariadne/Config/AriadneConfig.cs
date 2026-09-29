@@ -52,6 +52,13 @@ public sealed class AriadneConfig : IPluginConfiguration
     public float TeleportCostSeconds { get; set; } = 12f;
     /// <summary>Only teleport when it wins by at least this many seconds.</summary>
     public float TeleportMinSavingSeconds { get; set; } = 5f;
+    /// <summary>Fly whenever the zone allows it, even when the caller asked for a walk: call
+    /// the mount, fly the route, land and put the mount away. Ariadne's own SimpleMove surface
+    /// and the window only - the vnavmesh.* compat gates keep vnavmesh's behaviour.</summary>
+    public bool PreferFlying { get; set; }
+    /// <summary>Trips shorter than this stay on foot (yalms, horizontal).</summary>
+    public float FlyMinDistance { get; set; } = 50f;
+
     /// <summary>Interact goal: arrive within this many yalms of the object's centre plus its
     /// hitbox radius (3.5 is the safe margin Odysseus uses in the field).</summary>
     public float InteractRange { get; set; } = 3.5f;

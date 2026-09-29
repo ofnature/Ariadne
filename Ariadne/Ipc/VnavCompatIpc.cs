@@ -122,9 +122,10 @@ internal sealed class VnavCompatIpc : IDisposable
         Action<bool>("Path.SetAlignCamera", v => { _config.AlignCameraToMovement = v; saveConfig(); });
         Func("Path.GetTolerance", () => follower.Tolerance);
         Action<float>("Path.SetTolerance", v => follower.Tolerance = v);
-        // never a teleport leg here: these callers were written against vnavmesh, which walks
-        Func("SimpleMove.PathfindAndMoveTo", (Vector3 dest, bool fly) => move.MoveTo(dest, fly, allowTeleport: false));
-        Func("SimpleMove.PathfindAndMoveCloseTo", (Vector3 dest, bool fly, float range) => move.MoveTo(dest, fly, range, allowTeleport: false));
+        // never a teleport leg or a mount of our own here: these callers were written against
+        // vnavmesh, which does what it is told
+        Func("SimpleMove.PathfindAndMoveTo", (Vector3 dest, bool fly) => move.MoveTo(dest, fly, smart: false));
+        Func("SimpleMove.PathfindAndMoveCloseTo", (Vector3 dest, bool fly, float range) => move.MoveTo(dest, fly, range, smart: false));
         Func("SimpleMove.PathfindInProgress", () => move.TaskInProgress);
 
         // ---- Window / DTR ----

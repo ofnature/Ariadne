@@ -106,7 +106,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
             ReadAttunedAetherytes);
         _move = new MoveRequest(_broker, _follower, _config, () => ObjectTable.LocalPlayer?.Position,
             id => ObjectTable.SearchById(id) is { } o ? (o.Position, o.HitboxRadius) : null,
-            _teleports, m => { Log.Information(m); MainThreadTrace.Note(m); });
+            _teleports, new FlightControl(), m => { Log.Information(m); MainThreadTrace.Note(m); });
 
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
             () => _config.SyncGateBudgetMs);

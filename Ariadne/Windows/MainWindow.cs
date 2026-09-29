@@ -222,7 +222,7 @@ internal sealed class MainWindow : Window
                 + (_follower.CurrentLeg.Length > 0 ? $" [{_follower.CurrentLeg}]" : "")
                 + (_move.RetriesUsed > 0 ? $" (re-pathed ×{_move.RetriesUsed})" : ""));
         else if (_move.TaskInProgress)
-            ImGui.TextColored(Yellow, _move.TeleportStatus.Length > 0 ? _move.TeleportStatus : "pathfinding…");
+            ImGui.TextColored(Yellow, _move.PhaseText);
         else
             ImGui.TextColored(Grey, _move.LastResult.Length > 0 ? $"idle — last: {_move.LastResult}" : "idle");
 
@@ -428,6 +428,21 @@ internal sealed class MainWindow : Window
                 _config.AlignCameraHeight = height;
                 _saveConfig();
             }
+        }
+        Toggle("Fly whenever the zone allows it (Ariadne.* moves only)", () => _config.PreferFlying, v => _config.PreferFlying = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A walk request becomes a flight when flight is unlocked in the zone - A Realm Reborn zones\nincluded, once the story has unlocked them - and the trip is long enough. Ariadne calls the\nmount, flies the route, lands, and puts the mount away. Where walking is quicker the planner\nstill answers with the ground route. Never for vnavmesh.* compat calls.");
+        if (_config.PreferFlying)
+        {
+            ImGui.Indent();
+            ImGui.SetNextItemWidth(120);
+            var minFly = _config.FlyMinDistance;
+            if (ImGui.InputFloat("Shortest trip worth flying (yalms)", ref minFly, 10, 50, "%.0f"))
+            {
+                _config.FlyMinDistance = Math.Clamp(minFly, 0f, 2000f);
+                _saveConfig();
+            }
+            ImGui.Unindent();
         }
         Toggle("Use aetherytes when they save time (Ariadne.* moves only)", () => _config.UseAetherytes, v => _config.UseAetherytes = v);
         if (ImGui.IsItemHovered())

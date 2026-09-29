@@ -632,14 +632,24 @@ internal sealed class MeshBroker : IDisposable
         return result is SeedResult.Seeded or SeedResult.AlreadyCurrent;
     }
 
+    private readonly RepeatFilter _repeats = new();
+
+    // Every line goes through the repeat filter: a consumer that polls sends the same question
+    // many times a minute, and one line per answer buried both the log and the window's list.
     private void Activity(string message)
     {
-        _log($"[Broker] {message}");
+        string[] lines;
         lock (_activityLock)
         {
-            _activity.Enqueue($"{DateTime.Now:HH:mm:ss} {message}");
-            while (_activity.Count > MaxActivity)
-                _activity.Dequeue();
+            lines = _repeats.Admit(message, DateTime.UtcNow);
+            foreach (var line in lines)
+            {
+                _activity.Enqueue($"{DateTime.Now:HH:mm:ss} {line}");
+                while (_activity.Count > MaxActivity)
+                    _activity.Dequeue();
+            }
         }
+        foreach (var line in lines)
+            _log($"[Broker] {line}");
     }
 }

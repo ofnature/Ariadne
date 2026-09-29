@@ -53,4 +53,23 @@ public class BuildWatchPolicyTests
         Assert.Equal(-1f, BuildWatchPolicy.Progress(true, false, -1f, wantBuild: false, 0));
         Assert.Equal(-1f, BuildWatchPolicy.Progress(true, false, -1f, true, BuildWatchPolicy.MaxSends));
     }
+
+    [Theory]
+    // the offline store: built from layout files, nobody in the zone
+    [InlineData(@"C:\Users\x\AppData\Roaming\Mnemosyne\built\ex2_01_gyr_g3_evt_g3e6_level_g3e6__216B7____0.navmesh", true)]
+    [InlineData("C:/Users/x/AppData/Roaming/Mnemosyne/built/zone.navmesh", true)]
+    [InlineData(@"C:\Users\x\AppData\Roaming\mnemosyne\BUILT\zone.navmesh", true)]
+    // live builds: Ariadne's capture, and vnavmesh's own in-game build
+    [InlineData(@"C:\Users\x\AppData\Roaming\Mnemosyne\captured\zone.navmesh", false)]
+    [InlineData(@"C:\Users\x\AppData\Roaming\XIVLauncher\pluginConfigs\vnavmesh\meshcache\zone.navmesh", false)]
+    // a baked copy with overrides applied is served from its own store
+    [InlineData(@"C:\Users\x\AppData\Roaming\Mnemosyne\served\zone.navmesh", false)]
+    // a folder merely called "built" somewhere else is not Mnemosyne's store
+    [InlineData(@"D:\projects\built\zone.navmesh", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsOfflineBaseline_ReadsTheStoreFromThePath(string? path, bool expected)
+    {
+        Assert.Equal(expected, BuildWatchPolicy.IsOfflineBaseline(path));
+    }
 }

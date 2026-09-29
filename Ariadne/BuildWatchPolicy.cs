@@ -2,6 +2,14 @@ using System;
 
 namespace Ariadne;
 
+/// <summary>Why the broker is watching a zone, which decides what ends the watch.</summary>
+internal enum WatchMode
+{
+    Missing, // no usable mesh: any current mesh ends it
+    Forced,  // an explicit capture: only the build we asked for ends it
+    Upgrade, // the only mesh is Mnemosyne's offline baseline: a live-built one ends it
+}
+
 internal enum WatchAction
 {
     Requery,      // a mesh is there: run the zone query again and act on it
@@ -46,6 +54,30 @@ internal static class BuildWatchPolicy
         if (!reachable || building || !wantBuild)
             return WatchAction.Wait;
         return sends < MaxSends ? WatchAction.SendCapture : WatchAction.StopBuilding;
+    }
+
+    /// <summary>
+    /// The mesh at this path is Mnemosyne's OFFLINE baseline: built from the game's layout files
+    /// with nobody in the zone, so without the event, festival and shared-group layers that only
+    /// exist in a running game. Good enough to serve while nothing better exists, not good
+    /// enough to keep. Found 2026-09-28 in the Resonatorium (an instanced quest zone, where
+    /// those layers are most of the room): 987 polys in 82 islands, the platform the player
+    /// stood on cut off from the floor, and a route drawn across a table. The service had
+    /// built it for a path request that arrived before Ariadne's capture, and because a mesh
+    /// then existed, the capture was never sent.
+    ///
+    /// <para>The store is told from the path, since the protocol has no `source` field yet:
+    /// <c>%APPDATA%\Mnemosyne\built\</c> holds offline builds, <c>captured\</c> the live
+    /// ones, and vnavmesh's own cache its in-game builds.</para>
+    /// </summary>
+    public static bool IsOfflineBaseline(string? meshPath)
+    {
+        if (string.IsNullOrEmpty(meshPath))
+            return false;
+        var parts = meshPath.Replace('/', '\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 3
+            && parts[^2].Equals("built", StringComparison.OrdinalIgnoreCase)
+            && parts[^3].Equals("Mnemosyne", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Nav.BuildProgress for consumers: 0..1 while a mesh is on its way, -1 when

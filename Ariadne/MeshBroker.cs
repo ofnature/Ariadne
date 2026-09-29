@@ -405,10 +405,20 @@ internal sealed class MeshBroker : IDisposable
         Activity($"zone '{cacheKey}': {snapshot.Status} ({sw.Elapsed.TotalMilliseconds:0.0}ms"
             + (retry.Attempts > 1 ? $", attempt {retry.Attempts}" : "") + ")");
 
-        if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
+        if (snapshot.Status == ZoneMeshStatus.MnemosyneCached
+            && BuildWatchPolicy.IsOfflineBaseline(snapshot.MeshPath) && _buildOnMiss())
+        {
+            // Serve the baseline meanwhile (Nav.IsReady stays true), but do not seed it: copied
+            // into vnavmesh's cache it would pass for a live build on every later visit, and the
+            // zone would never be captured. The watch re-queries when the capture has landed,
+            // and that pass seeds the real one.
+            Activity($"'{cacheKey}' only has Mnemosyne's offline baseline — capturing the live zone to replace it");
+            await WatchUntilReadyAsync(cacheKey, WatchMode.Upgrade).ConfigureAwait(false);
+        }
+        else if (snapshot.Status == ZoneMeshStatus.MnemosyneCached && _autoSeed())
             await SeedAsync(cacheKey).ConfigureAwait(false);
         else if (snapshot.Status is ZoneMeshStatus.Missing or ZoneMeshStatus.MnemosyneUnavailable)
-            await WatchUntilReadyAsync(cacheKey, force: false).ConfigureAwait(false);
+            await WatchUntilReadyAsync(cacheKey, WatchMode.Missing).ConfigureAwait(false);
     }
 
     // The vnavmesh-replacement path: nobody has a mesh, so capture the live scene (only
@@ -429,7 +439,7 @@ internal sealed class MeshBroker : IDisposable
             return false;
         }
         Activity($"capturing '{key}' on request");
-        await WatchUntilReadyAsync(key, force: true).ConfigureAwait(false);
+        await WatchUntilReadyAsync(key, WatchMode.Forced).ConfigureAwait(false);
         return true;
     }
 
@@ -441,10 +451,14 @@ internal sealed class MeshBroker : IDisposable
     /// takeover mode its IPC is ours, so the file is the only way to see that) and at the
     /// service, and follows <see cref="BuildWatchPolicy"/>. Consumers see Nav.BuildProgress
     /// >= 0 for as long as a mesh is on its way.</summary>
-    /// <param name="force">An explicit capture: rebuild although a mesh exists, so "a mesh is
-    /// there" does not end the watch until the build we asked for has been seen to finish.</param>
-    private async Task WatchUntilReadyAsync(string cacheKey, bool force)
+    /// <param name="mode">What ends the watch. Missing: any current mesh. Forced (an explicit
+    /// capture): the build we asked for, seen to finish, since a mesh exists already. Upgrade:
+    /// a mesh that is not the offline baseline — asked of the service each poll, so that with
+    /// several clients in one zone the first capture to land ends everyone's watch, instead of
+    /// each client rebuilding the zone in turn.</param>
+    private async Task WatchUntilReadyAsync(string cacheKey, WatchMode mode)
     {
+        var force = mode == WatchMode.Forced;
         lock (_activityLock)
         {
             if (!_watching.Add(cacheKey))
@@ -471,9 +485,14 @@ internal sealed class MeshBroker : IDisposable
                     || status is { Ok: true, Status: "cached" };
                 // forced: the mesh that is there is the one being replaced, until our build has
                 // run (or two idle polls after sending say it came and went between polls)
-                var ready = force
-                    ? sends > 0 && !building && (sawBuilding || idlePolls >= 2)
-                    : meshThere;
+                var ready = mode switch
+                {
+                    WatchMode.Forced => sends > 0 && !building && (sawBuilding || idlePolls >= 2),
+                    WatchMode.Upgrade => _seeder.LocalStatus(cacheKey) == LocalMeshStatus.Current
+                        || (!building && await _client.GetMeshAsync(cacheKey).ConfigureAwait(false)
+                            is { Ok: true, Path: { } served } && !BuildWatchPolicy.IsOfflineBaseline(served)),
+                    _ => meshThere,
+                };
 
                 switch (BuildWatchPolicy.Decide(ready, reachable, building, wantBuild, sends))
                 {

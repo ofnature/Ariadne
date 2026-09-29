@@ -163,27 +163,45 @@ public sealed class AriadnePlugin : IDalamudPlugin
         Log.Information($"Ariadne v{PluginVersion} loaded (vnav cache: {vnavCacheDir}).");
     }
 
+    // Runs on the game's main thread (the manifest does not allow an async unload), so anything
+    // that blocks here freezes the game - and an update unloads the plugin whatever it is doing.
+    // A client froze during an update while it was pathing (2026-09-28) and left no record of
+    // where. Each step names itself now: the heartbeat stops with the first one, so a step that
+    // does not return within a second is written to the trace by name.
     public void Dispose()
     {
-        CommandManager.RemoveHandler(CommandMain);
-        CommandManager.RemoveHandler(CommandShort);
-        Framework.Update -= OnFrameworkTick;
-        PluginInterface.UiBuilder.Draw -= Draw;
-        _dtr.Dispose();
-        PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
-        PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
-        _windowSystem.RemoveAllWindows();
-        _vnavCompat.Dispose();
-        _ipc.Dispose();
-        _move.Dispose();
-        _follower.Dispose(); // unhooks movement/camera
-        _signal.Dispose();   // clears + relinquishes shared-data flags
-        _navReadyShared[0] = false;
-        PluginInterface.RelinquishData("ariadne.NavReady");
-        _zoneWatcher.Dispose();
-        _broker.Dispose(); // disposes the pipe client
+        MainThreadTrace.Note($"unloading (path running: {_follower.IsRunning}, request in flight: {_move.TaskInProgress})");
+        using (Unload("commands and subscriptions"))
+        {
+            CommandManager.RemoveHandler(CommandMain);
+            CommandManager.RemoveHandler(CommandShort);
+            Framework.Update -= OnFrameworkTick;
+            PluginInterface.UiBuilder.Draw -= Draw;
+            PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
+            PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
+        }
+        using (Unload("dtr entry and windows"))
+        {
+            _dtr.Dispose();
+            _windowSystem.RemoveAllWindows();
+        }
+        using (Unload("vnavmesh.* gates")) _vnavCompat.Dispose();
+        using (Unload("Ariadne.* gates")) _ipc.Dispose();
+        using (Unload("move request")) _move.Dispose();
+        using (Unload("path follower and its hooks")) _follower.Dispose();
+        using (Unload("shared flags"))
+        {
+            _signal.Dispose();
+            _navReadyShared[0] = false;
+            PluginInterface.RelinquishData("ariadne.NavReady");
+        }
+        using (Unload("zone watcher")) _zoneWatcher.Dispose();
+        using (Unload("broker and pipe client")) _broker.Dispose();
+        MainThreadTrace.Note("unloaded");
         MainThreadTrace.Stop();
     }
+
+    private static MainThreadTrace.Scope Unload(string step) => MainThreadTrace.Enter("unload: " + step, anyThread: true);
 
     private void OnFrameworkTick(Dalamud.Plugin.Services.IFramework fwk)
     {

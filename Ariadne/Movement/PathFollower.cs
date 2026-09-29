@@ -115,7 +115,12 @@ internal sealed class PathFollower : IDisposable
 
     public void Dispose()
     {
-        _signal.Set(false);
+        // Unloaded in the middle of a path (a plugin update does that): drop the path and switch
+        // both overrides off first, so the hooks are idle when they are removed rather than
+        // being pulled out from under a game that is still being steered through them.
+        Stop();
+        _movement.Enabled = false;
+        _camera.Enabled = false;
         _camera.Dispose();
         _movement.Dispose();
     }

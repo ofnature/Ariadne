@@ -309,9 +309,13 @@ internal sealed class MnemosyneClient : IDisposable
         ServerApp = null;
         ServerExePath = null;
         ServerBuiltAt = null;
+        // The pipe first. Disposing the writer flushes it, and a flush is a synchronous write:
+        // with the handle still open and the service slow to read (it is mid-build, or gone
+        // quiet), that write waits - on the game's main thread, when this runs from the
+        // plugin's unload. With the handle closed the flush fails at once, which is swallowed.
+        try { _pipe?.Dispose(); } catch { }
         try { _writer?.Dispose(); } catch { }
         try { _reader?.Dispose(); } catch { }
-        try { _pipe?.Dispose(); } catch { }
         _reader = null;
         _writer = null;
         _pipe = null;

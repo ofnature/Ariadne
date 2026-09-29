@@ -79,9 +79,11 @@ internal static class MainThreadTrace
 
     /// <summary>Name the code the main thread is about to run. Off the main thread this does
     /// nothing, so shared code (the pipe client, the broker) can call it freely.</summary>
-    public static Scope Enter(string section)
+    /// <param name="anyThread">Record the section whichever thread runs it. For the unload:
+    /// it is the one thing that must be traceable even if Dalamud calls it from elsewhere.</param>
+    public static Scope Enter(string section, bool anyThread = false)
     {
-        if (_path == null || Environment.CurrentManagedThreadId != _mainThreadId)
+        if (_path == null || (!anyThread && Environment.CurrentManagedThreadId != _mainThreadId))
             return default;
         var previous = _section;
         var previousSince = Volatile.Read(ref _sectionSince);

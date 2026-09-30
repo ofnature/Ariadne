@@ -158,6 +158,7 @@ and increments `Path.StallCount`; re-planning is the owner's job
 | `Ariadne.CaptureZone` | `() → Task<bool>` | capture the live layout and rebuild this zone **even though a mesh already exists** — the only route to a festival or shared-group variant, since the automatic path fires on a cache miss only. False = zone not ready |
 | `Ariadne.ReportTraversal` | `(Vector3 from, Vector3 to, string mode, bool success) → Task<bool>` | feed the mesh-learning channel: `mode` `"direct"` + `success` = "I drove through where the mesh said no" (off-mesh-link evidence — Yedlihmad doorways); `success:false` = a planned route failed there. Best-effort; false = not recorded |
 | `Ariadne.Query.Mesh.ReachableCells` | `(Vector3 from, float radius, float cellSize, float minY, float maxY) → Task<(string Result, Vector3 Start, Vector2 Origin, float CellSize, int Width, int Depth, int[] Columns, float[] Heights, byte[] States, bool ReachableOutside)>` | **live both sides 2026-09-19.** Which walkable ground is reachable from `from`, as a world-aligned grid of stacked surfaces (`States`: 1 reachable · 2 cutOff; a column with no surface has no mesh). `minY`/`maxY` = `float.NaN` for no height band. Full semantics: `mnemosyne-protocol.md` → `reachableCells` |
+| `Ariadne.Query.Zone.Transitions` | `(Vector3 near, float radius) → Task<(string Result, List<(string Id, string Kind, string Source, Vector3 From, Vector3 To, Vector3? FromSnap, Vector3? ToSnap, Vector3[] Path, Vector3[] EnterAt, int Lanes)> Transitions)>` | **spec'd 2026-09-29, not implemented.** Slides, rides and lifts to step into, ledges to drop off, and things that roll or fall across the route, for the current zone. `radius` ≤ 0 = whole zone. `Kind`: `ride` · `slide` · `lift` · `drop` · `hazard`. Full semantics: `mnemosyne-protocol.md` → `transitions` |
 
 **ReachableCells** is for exploration (Theseus's auto-solver): find ground not yet visited, and
 the edges where walkable mesh is cut off. It returns reachability only. Keep visited state on your
@@ -184,6 +185,16 @@ more dangerous claim than "I could not answer". `Start` is the server's snapped 
 own `from` when it reported none (a `startOffMesh` answer). The wire answer also carries
 `nearest` and poly counts; this tuple does not surface them — say the word if the auto-solver
 wants `nearest` on an off-mesh start and we will extend the shape.
+
+**Transitions** is the zone's crossings that walking cannot do, and its hazards. For `ride`,
+`slide` and `lift`, walk to a point in `EnterAt` and step in, then hold movement and stuck detection
+until the character lands near `ToSnap`. For `drop`, walk to `FromSnap` and keep going towards
+`ToSnap`. All of these are one-way. A `hazard` is not a crossing: `Path` is the line something
+travels onto the route, ending where it lands, and **when** it runs is not in the data — watch for
+it. `FromSnap`/`ToSnap` are null when no walkable ground lies within 10 y. `Result` uses the
+`findPath` vocabulary, and an `ok` with an empty list is normal: most dungeons have none. Like
+`ReachableCells`, it returns BCL types only and is `Task`-returning; await it off the framework
+thread. It does not change `findPath`; routing through transitions is a later, opt-in change.
 
 **Readiness**: there is no `Nav.IsReady` twin. "Nav can answer for this zone" =
 `IsConnected && ZoneStatus is 2 or 3`. Because Mnemosyne holds meshes out of process,

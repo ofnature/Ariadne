@@ -360,6 +360,105 @@ so the two pictures can be put side by side. They agree wherever a cell centre i
 diverge in the fringes: `reachmap`'s 20 y snap calls a cell reachable when *any* ground is
 within 20 y of it, while this op samples the centre, as specified.
 
+### `transitions`  (spec'd 2026-09-29, Mnemosyne session — **not implemented yet**)
+
+The places in a zone where a character is moved, or knocked over, by something other than walking:
+slides, rides and lifts it steps into; ledges it drops off; things that roll or fall across the
+route. Asked for by Theseus's auto-solver (`theseus-autosolver-architecture.md`, the section written
+after The Burn): the two crossings that stopped that run are laid out in the zone files, and the
+solver should path from that data instead of inferring a drop from a route that ends short.
+
+v1 is a **listing**. Routing through transitions is a separate, later change to `findPath`
+(below); nothing here changes what `findPath` answers today.
+
+```
+transitions { cacheKey, near?: [x,y,z], radius?: 0, include?: ["boss", "ambient"] }
+  → { ok, result: "ok", transitions: [ {
+        id:       "cp:7559897" | "drop:<x>:<y>:<z>",   // stable across calls and variants
+        kind:     "ride" | "slide" | "lift" | "drop" | "hazard"   (+ "boss" | "ambient" when included),
+        source:   "zoneFile" | "mesh",
+        from:     [x,y,z],       // where it is entered; for a hazard, where it starts
+        to:       [x,y,z],       // where it sets you down; for a hazard, where it lands
+        fromSnap?: [x,y,z],      // nearest walkable point to `from` on the served mesh, within 10 y
+        toSnap?:   [x,y,z],      // same for `to` - the landing to path on from
+        path?:    [[x,y,z], ...],// zone-file control points in world space, in travel order
+        enterAt?: [ { pos: [x,y,z], shape: "Box"|"Cylinder"|..., scale: [x,y,z], instanceId } ],
+        lanes:    int,           // parallel copies merged into this one (a slide has four)
+        length, climb,           // along `path` (or from->to for a drop); climb < 0 is downhill
+        instanceIds: [int, ...], layer: "planmap.lgb/LVD_GIMMICK_01"
+      } ] }
+```
+
+`near` + `radius` (yalms, horizontal) keep transitions with either end inside the circle;
+`radius` 0 or absent means the whole zone. Results are ordered by distance from `near` when it is
+given, otherwise by kind.
+
+**The kinds, and where each comes from.**
+
+| kind | source | what it is | how it is recognised |
+|---|---|---|---|
+| `ride` | zoneFile | carried roughly level (Xelphatol's wind shuttles) | a scripted path (`ClientPath`) with a trigger volume within 4 y of its start, ≥ 8 y long, climb within ±5 y |
+| `slide` | zoneFile | carried downhill (The Burn's slide into the Scorpion's Den) | as `ride`, climb ≤ −5 y |
+| `lift` | zoneFile | carried uphill | as `ride`, climb ≥ +5 y |
+| `drop` | mesh | a ledge you walk off (The Burn's entrance, 4 y) | the edge of one mesh island within 3 y horizontally of a lower island, 0.5–10 y below |
+| `hazard` | zoneFile | something that rolls or falls onto the route (The Burn's boulders) | a scripted path with no trigger at its start, descending ≥ 5 y, ending on walkable mesh |
+| `boss` | zoneFile | a boss fight's own scripted mechanics | a scripted path in a layer whose name contains `boss`; omitted unless included |
+| `ambient` | zoneFile | NPC walk loops, effects | every other scripted path; omitted unless included |
+
+A trigger at the start is what separates something you step into from something that comes at you;
+whether the start has walkable ground under it does not (a boulder in The Burn starts on a meshed
+cliff ledge). Parallel paths of one kind whose ends are within 5 y of each other are merged, with
+`lanes` counting them and `enterAt` holding every lane's trigger.
+
+**Mesh checks are always against the served mesh.** `fromSnap`/`toSnap` are computed on the mesh
+this op serves for `cacheKey`, so they agree with `findPath`. A `hazard` whose end is not on
+walkable mesh is reported as `ambient` instead: it comes down, but not where a character stands.
+A slide's `to` is not always on walkable mesh (The Burn's main slide ends off it); `toSnap` is
+where to path on from.
+
+**What a consumer does with each.**
+- `ride` / `slide` / `lift`: walk to a point of `enterAt` (or `fromSnap`), step in, stop moving and
+  stop stuck detection until the character lands near `toSnap` — the transit guard's job. All are
+  one-way: none is listed in reverse unless the zone files contain a reverse path.
+- `drop`: walk to `fromSnap`, keep walking in the direction of `toSnap` until airborne and landed.
+- `hazard`: not a crossing. `path` is the line it travels, ending where it lands; the route near
+  `toSnap` is dangerous while it runs. **Timing is not in the zone files** — what sets it off and
+  when is for the consumer to observe (The Burn has trigger boxes on the path 20–40 y away, which is
+  suggestive but unverified).
+
+**Deliberately not in v1.**
+- *Interaction-gated crossings* (Xelphatol's counterweight lift, worked by levers): there is no
+  scripted path; they are a shared-group animation plus two event objects. A later `kind:
+  "interact"` would carry the lever ids; until then the object table and the gate ledger find them.
+- *Warps* (touch a crystal, appear elsewhere): not in scripted paths either.
+- *Seams* (two islands a step apart at one height): most are walls — 64 of 66 at Camp Dragonhead,
+  213 of 216 in Yanxia were blocked by collision — so they are a mesh-building concern, not a
+  transition.
+- *Layer activity.* Zone files hold every layer a territory can show; a transition from a festival
+  or quest-phase layer that is off in the live variant is still listed. `layer` names it so a
+  consumer can discount one that is never seen. Filtering by the live capture's active layers is a
+  later refinement.
+
+**Classified results**, same vocabulary as `findPath`: `meshNotReady` (retryable),
+`failed` (unknown zone or bad arguments). An `ok` with an empty list is a real answer: 72 of 111
+dungeons have no ride, slide, lift or hazard at all (measured 2026-09-29).
+
+**Cost.** Zone files are read once per territory and cached; the mesh checks once per `cacheKey`.
+Both are small: the most any dungeon has is about 130 scripted paths (Lapis Manalis).
+
+**Measured before speccing** (`Mnemosyne.Cli transitions`, 111 dungeons, 2026-09-29): ride 15 in
+10 duties, slide 32 in 14, lift 21 in 9, hazard 53 in 24, boss 138 in 12. Checked by hand against
+Xelphatol (two 59 y shuttles), The Burn (the slide, the drop before the last boss as a four-lane
+slide ending where the route stops short, both boulders) and Mistwake (its slide). `drop` is not in
+that run: it is the island-gap classification `components` already prints, and has been checked on
+The Burn's entrance only.
+
+**Later: transitions in routes.** `findPath` gains `transitions?: ["slide", "drop", "ride", ...]`,
+the kinds the caller will perform. The planner then treats each as a one-way hop from `fromSnap`
+to `toSnap`, and a route through one carries a leg for it:
+`{ mode: "walk", enter: "slide" | "drop" | "ride" | "lift", enterArg: "<transition id>" }`, extending
+the `enter` vocabulary of the multi-modal legs above. Callers that do not ask get today's answers.
+
 ### `buildBitmap`  (spec'd 2026-08-24)
 
 `Nav.BuildBitmap{,Bounded,Multi,MultiBounded}` — Olympus uses the bounded forms.

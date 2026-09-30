@@ -14,7 +14,9 @@ namespace Ariadne.Mnemosyne;
 //   1. the configured path  - an explicit choice; always wins
 //   2. the marker           - a service that has run here before stamped its own path into
 //                             %APPDATA%\Mnemosyne\service.path; a development machine keeps
-//                             running its own build and never pays for the bundled copy
+//                             running its own build and never pays for the bundled copy.
+//                             A marker that names an earlier *staged* bundle does not count:
+//                             the bundle carried now supersedes it (2026-09-29)
 //   3. the bundled payload  - `service/` inside the plugin package, staged under %APPDATA% and
 //                             launched from there (see BundledService), so a machine that has
 //                             never built Mnemosyne still gets a working service
@@ -42,7 +44,74 @@ internal static class ServiceLauncher
         Path.GetDirectoryName(typeof(ServiceLauncher).Assembly.Location) ?? "";
 
     /// <summary>What autostart would use, why, and whether it has to be staged first.</summary>
-    internal readonly record struct Resolution(string? Exe, string Reason, bool NeedsStaging);
+    internal readonly record struct Resolution(string? Exe, string Reason, bool NeedsStaging,
+        ServiceSource Source = ServiceSource.None);
+
+    /// <summary>The service that answered is not the one that should be running, and nothing
+    /// chose it on purpose - so it should make way. Null when it may stay.
+    ///
+    /// <para>Found 2026-09-29 on a machine with two clients: every exploration query failed with
+    /// "unknown op", because a service from before 2026-09-14 was answering the pipe. Three plugin
+    /// updates had shipped a newer one and none of them replaced it: the launcher starts a
+    /// service only when the pipe is absent, and the old one never let go of it.</para></summary>
+    /// <param name="target">What autostart would run now.</param>
+    /// <param name="runningExe">The answering service's exe from `hello`; null when it is too
+    /// old to say (before 2026-09-20).</param>
+    /// <param name="bundleCarried">This package ships a service at all.</param>
+    public static string? WhyReplace(Resolution target, string? runningExe, bool bundleCarried)
+    {
+        if (!bundleCarried || target.Exe == null || target.Source == ServiceSource.Configured)
+            return null; // nothing to offer instead, or an explicit choice: theirs to keep
+        if (runningExe == null)
+            return "it does not say which build it is, so it predates 2026-09-20, and this package ships a newer one";
+        if (target.Source != ServiceSource.Bundled)
+            return null; // a hand-built service the marker names: a development machine's own
+        if (string.Equals(runningExe.TrimEnd('\\'), target.Exe.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+            return null;
+        return $"it is {runningExe}, not the service this package ships ({target.Exe})";
+    }
+
+    private static DateTime _nextReplace = DateTime.MinValue;
+    private static readonly TimeSpan ReplaceCooldown = TimeSpan.FromMinutes(10);
+
+    /// <summary>Stop the running service and forget its marker, so the next launch resolves to
+    /// the bundle. Once per ten minutes: a service that cannot be killed (another user's, or
+    /// one that respawns from elsewhere) must not be fought every reconnect. Returns whether it
+    /// acted.</summary>
+    public static bool Replace(string why, Action<string> log)
+    {
+        if (DateTime.UtcNow < _nextReplace)
+            return false;
+        _nextReplace = DateTime.UtcNow + ReplaceCooldown;
+
+        var killed = 0;
+        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(BundledService.ExeName)))
+        {
+            using (proc)
+            {
+                try
+                {
+                    proc.Kill();
+                    killed++;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    log($"[Mnemosyne] could not stop the service (pid {proc.Id}): {ex.Message}");
+                }
+            }
+        }
+        try
+        {
+            File.Delete(MarkerPath); // it names the build that just left; the bundle stamps its own
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log($"[Mnemosyne] could not remove the marker at {MarkerPath}: {ex.Message}");
+        }
+        _nextAttempt = DateTime.MinValue; // the pipe is about to be absent: launch on the next connect
+        log($"[Mnemosyne] replacing the running service - {why}; stopped {killed} process(es), the bundled one starts next");
+        return true;
+    }
 
     public static string? ResolveExe(string? configured) => ResolveExe(configured, out _);
 
@@ -69,24 +138,33 @@ internal static class ServiceLauncher
     {
         var hasConfigured = !string.IsNullOrWhiteSpace(configured);
         if (hasConfigured && File.Exists(configured))
-            return new Resolution(configured, "configured path", false);
+            return new Resolution(configured, "configured path", false, ServiceSource.Configured);
 
         var roots = appDataRoot ?? AppDataRoot;
         var marked = ReadMarker(out var markerWhyNot, roots);
-        if (marked != null)
-            return new Resolution(marked, "the marker", false);
-
         var payload = BundledService.PayloadDir(pluginDir ?? PluginDir);
+
+        // A marker inside the staging folder was written by a bundle this plugin staged before.
+        // It does not outrank the bundle the plugin carries now: that is how three updates
+        // shipped a newer service and the old one kept answering (2026-09-29).
+        var superseded = marked != null && payload != null && IsUnderStageRoot(marked, roots);
+        if (marked != null && !superseded)
+            return new Resolution(marked, "the marker", false, ServiceSource.Marker);
+
         if (payload != null)
         {
             var version = BundledService.Describe(payload);
             var stage = BundledService.StageDir(roots, version);
             var staged = BundledService.IsStaged(stage);
+            var exe = Path.Combine(stage, BundledService.ExeName);
+            var note = superseded && !string.Equals(marked, exe, StringComparison.OrdinalIgnoreCase)
+                ? $"; the marker names an earlier staged bundle, {marked}, which this one supersedes"
+                : "";
             return new Resolution(
-                Path.Combine(stage, BundledService.ExeName),
+                exe,
                 $"the bundled service {version} at {payload}"
-                    + (staged ? " (already staged)" : " (not staged yet)"),
-                NeedsStaging: !staged);
+                    + (staged ? " (already staged)" : " (not staged yet)") + note,
+                NeedsStaging: !staged, ServiceSource.Bundled);
         }
 
         var configuredNote = hasConfigured ? $"configured path '{configured}' does not exist; " : "";
@@ -95,6 +173,13 @@ internal static class ServiceLauncher
             + $"'{Path.Combine(pluginDir ?? PluginDir, BundledService.PayloadFolderName)}' "
             + "(reinstall the plugin, or set the path in the config)",
             false);
+    }
+
+    private static bool IsUnderStageRoot(string exe, string appDataRoot)
+    {
+        var root = Path.Combine(appDataRoot, "Mnemosyne", BundledService.StageFolderName)
+            .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return exe.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The existing marker logic, on its own so the two callers can differ: autostart
@@ -252,3 +337,7 @@ internal static class ServiceLauncher
         }
     }
 }
+
+/// <summary>Where autostart's answer came from. Decides whether a running service that is not
+/// that answer may stay: an explicit path or a hand-built marker is a choice, the bundle is not.</summary>
+internal enum ServiceSource { None, Configured, Marker, Bundled }

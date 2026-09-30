@@ -266,6 +266,18 @@ internal sealed class MnemosyneClient : IDisposable
             ServerApp = $"{hello.App} {hello.Version}";
             ServerExePath = hello.ExePath is { Length: > 0 } ? hello.ExePath : null;
             ServerBuiltAt = hello.BuiltAt is { Length: > 0 } ? hello.BuiltAt : null;
+
+            // A service that is not the one this package ships, and that nothing chose: stop it,
+            // and the reconnect finds the pipe absent and starts the bundle (ServiceLauncher.WhyReplace).
+            if (_serviceExePath?.Invoke() is { } configured
+                && ServiceLauncher.WhyReplace(ServiceLauncher.Resolve(configured), ServerExePath,
+                    BundledService.PayloadDir(ServiceLauncher.PluginDir) != null) is { } why
+                && ServiceLauncher.Replace(why, _logWarning))
+            {
+                Drop();
+                _nextConnectAttempt = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+                return false;
+            }
             _backoff = InitialBackoff;
             _nextConnectAttempt = DateTime.MinValue;
             _logInfo($"[Mnemosyne] Connected to {ServerApp} (protocol {hello.Protocol}, mesh v{hello.MeshVersion})");

@@ -91,6 +91,9 @@ public unsafe class OverrideMovement : IDisposable
 
     private void RMIWalkDetour(void* self, float* sumLeft, float* sumForward, float* sumTurnLeft, byte* haveBackwardOrStrafe, byte* a6, byte bAdditiveUnk)
     {
+        // Ariadne addition: these run on the main thread once a frame while a path is followed,
+        // outside the framework tick, so a freeze inside them read as "outside Ariadne" (2026-09-29).
+        using var trace = MainThreadTrace.Enter("movement hook (walk)");
         _rmiWalkHook.Original(self, sumLeft, sumForward, sumTurnLeft, haveBackwardOrStrafe, a6, bAdditiveUnk);
         // TODO: we really need to introduce some extra checks that PlayerMoveController::readInput does - sometimes it skips reading input, and returning something non-zero breaks stuff...
         bool movementAllowed = bAdditiveUnk == 0 && _rmiWalkIsInputEnabled1(self) && _rmiWalkIsInputEnabled2(self);
@@ -105,6 +108,7 @@ public unsafe class OverrideMovement : IDisposable
 
     private void RMIFlyDetour(void* self, PlayerMoveControllerFlyInput* result)
     {
+        using var trace = MainThreadTrace.Enter("movement hook (fly)");
         _rmiFlyHook.Original(self, result);
         UserInput = result->Forward != 0 || result->Left != 0 || result->Up != 0;
         // TODO: we really need to introduce some extra checks that PlayerMoveController::readInput does - sometimes it skips reading input, and returning something non-zero breaks stuff...

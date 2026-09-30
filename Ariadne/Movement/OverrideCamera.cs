@@ -59,6 +59,7 @@ public unsafe class OverrideCamera : IDisposable
 
     private void RMICameraDetour(CameraEx* self, int inputMode, float speedH, float speedV)
     {
+        using var trace = MainThreadTrace.Enter("camera hook"); // Ariadne addition, see OverrideMovement
         _rmiCameraHook.Original(self, inputMode, speedH, speedV);
         if (IgnoreUserInput || inputMode == 0) // let user override...
         {

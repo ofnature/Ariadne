@@ -227,4 +227,96 @@ public class BundledServiceTests : IDisposable
         Assert.Contains("reinstall the plugin", resolved.Reason);
         Assert.Contains("hand-built service", resolved.Reason); // why the marker is missing
     }
+
+    [Fact]
+    public void AMarkerLeftByAnEarlierStagedBundle_DoesNotOutrankTheBundleCarriedNow()
+    {
+        // v0.1.2 staged 0.1.0+980a6dc and that service stamped the marker. v0.1.5 ships a newer
+        // bundle; the marker must not keep the old stage in charge.
+        var plugin = PluginDir("0.1.0+abc1234");
+        var appData = AppData();
+        var old = Path.Combine(BundledService.StageDir(appData, "0.1.0+980a6dc"), BundledService.ExeName);
+        Directory.CreateDirectory(Path.GetDirectoryName(old)!);
+        File.WriteAllText(old, "old staged service");
+        Marker(old);
+
+        var resolved = ServiceLauncher.Resolve(null, appData, plugin);
+
+        Assert.Equal(Path.Combine(BundledService.StageDir(appData, "0.1.0+abc1234"), BundledService.ExeName), resolved.Exe);
+        Assert.Equal(ServiceSource.Bundled, resolved.Source);
+        Assert.True(resolved.NeedsStaging);
+        Assert.Contains("supersedes", resolved.Reason);
+    }
+
+    [Fact]
+    public void AMarkerNamingTheCurrentStagedBundle_IsThatBundle()
+    {
+        var plugin = PluginDir();
+        var appData = AppData();
+        var payload = Path.Combine(plugin, BundledService.PayloadFolderName);
+        var exe = BundledService.Stage(payload, BundledService.StageDir(appData, BundledService.PayloadVersion(payload)));
+        Marker(exe);
+
+        var resolved = ServiceLauncher.Resolve(null, appData, plugin);
+
+        Assert.Equal(exe, resolved.Exe);
+        Assert.Equal(ServiceSource.Bundled, resolved.Source);
+        Assert.False(resolved.NeedsStaging);
+        Assert.DoesNotContain("supersedes", resolved.Reason);
+        Assert.Null(ServiceLauncher.WhyReplace(resolved, exe.ToUpperInvariant(), bundleCarried: true));
+    }
+
+    [Fact]
+    public void AHandBuiltMarker_StillWinsOverTheBundle_AndItsServiceStays()
+    {
+        var plugin = PluginDir();
+        var marked = Path.Combine(_root, "dev", "bin", BundledService.ExeName);
+        Directory.CreateDirectory(Path.GetDirectoryName(marked)!);
+        File.WriteAllText(marked, "dev build");
+        Marker(marked);
+
+        var resolved = ServiceLauncher.Resolve(null, AppData(), plugin);
+
+        Assert.Equal(marked, resolved.Exe);
+        Assert.Equal(ServiceSource.Marker, resolved.Source);
+        Assert.Null(ServiceLauncher.WhyReplace(resolved, marked, bundleCarried: true));
+        // even a different, newer hand-built exe answering is the developer's business
+        Assert.Null(ServiceLauncher.WhyReplace(resolved, Path.Combine(_root, "dev2", BundledService.ExeName), bundleCarried: true));
+    }
+
+    [Fact]
+    public void AServiceTooOldToNameItself_IsReplaced_UnlessChosenExplicitly()
+    {
+        // the roommate's machine, 2026-09-29: "unknown op 'reachableCells'" from a service that
+        // predates the hello fields, whatever the marker says
+        var plugin = PluginDir();
+        var viaBundle = ServiceLauncher.Resolve(null, AppData("fresh"), plugin);
+        Assert.NotNull(ServiceLauncher.WhyReplace(viaBundle, null, bundleCarried: true));
+
+        var marked = Path.Combine(_root, "dev", BundledService.ExeName);
+        Directory.CreateDirectory(Path.GetDirectoryName(marked)!);
+        File.WriteAllText(marked, "old dev build");
+        Marker(marked);
+        var viaMarker = ServiceLauncher.Resolve(null, AppData(), plugin);
+        Assert.NotNull(ServiceLauncher.WhyReplace(viaMarker, null, bundleCarried: true));
+
+        var configured = ServiceLauncher.Resolve(marked, AppData(), plugin);
+        Assert.Equal(ServiceSource.Configured, configured.Source);
+        Assert.Null(ServiceLauncher.WhyReplace(configured, null, bundleCarried: true));
+
+        // and a package without a service has nothing to replace it with
+        Assert.Null(ServiceLauncher.WhyReplace(viaBundle, null, bundleCarried: false));
+    }
+
+    [Fact]
+    public void AStrangerAnsweringWhenTheBundleShouldRun_IsReplaced()
+    {
+        var plugin = PluginDir();
+        var viaBundle = ServiceLauncher.Resolve(null, AppData("fresh"), plugin);
+
+        var why = ServiceLauncher.WhyReplace(viaBundle, Path.Combine(_root, "elsewhere", BundledService.ExeName), bundleCarried: true);
+
+        Assert.NotNull(why);
+        Assert.Contains("not the service this package ships", why);
+    }
 }

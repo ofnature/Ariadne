@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +30,16 @@ internal sealed class MnemosyneClient : IDisposable
     /// week-old build for a week with a log line as the only evidence.</summary>
     public string? ServerExePath { get; private set; }
     public string? ServerBuiltAt { get; private set; }
+
+    /// <summary>The process on the other end of the pipe, from Windows rather than from `hello`:
+    /// whatever answers, under whatever name. On the roommate's PC (2026-10-04) something answered
+    /// without saying which build it was, and stopping every Mnemosyne.Service did not remove it.
+    /// Null while disconnected or when Windows will not say.</summary>
+    public int? ServerProcessId { get; private set; }
+    public string? ServerProcessPath { get; private set; }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint processId);
 
     private readonly string _pipeName;
     private readonly Action<string> _logInfo;
@@ -258,6 +269,11 @@ internal sealed class MnemosyneClient : IDisposable
                 await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
             }
             _pipe = pipe;
+            if (GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var serverPid))
+            {
+                ServerProcessId = (int)serverPid;
+                ServerProcessPath = ProcessPath((int)serverPid);
+            }
             _reader = new StreamReader(pipe, leaveOpen: true);
             _writer = new StreamWriter(pipe, leaveOpen: true) { NewLine = "\n" };
 
@@ -279,7 +295,7 @@ internal sealed class MnemosyneClient : IDisposable
             if (_serviceExePath?.Invoke() is { } configured
                 && ServiceLauncher.WhyReplace(ServiceLauncher.Resolve(configured), ServerExePath,
                     BundledService.PayloadDir(ServiceLauncher.PluginDir) != null) is { } why
-                && ServiceLauncher.Replace(why, _logWarning))
+                && ServiceLauncher.Replace(why, _logWarning, ServerProcessId))
             {
                 Drop();
                 _nextConnectAttempt = DateTime.UtcNow + TimeSpan.FromSeconds(3);
@@ -288,6 +304,8 @@ internal sealed class MnemosyneClient : IDisposable
             _backoff = InitialBackoff;
             _nextConnectAttempt = DateTime.MinValue;
             _logInfo($"[Mnemosyne] Connected to {ServerApp} (protocol {hello.Protocol}, mesh v{hello.MeshVersion})");
+            if (ServerProcessId is { } servedBy)
+                _logInfo($"[Mnemosyne] Pipe served by pid {servedBy}: {ServerProcessPath ?? "path unknown"}");
             // Which *build* is answering, not just which app. The machine ran a service built
             // 2026-09-12 for a week while the tree moved on and nothing said so — not the window,
             // not the log. Both ends name it now, and a service that is not the build the marker
@@ -318,6 +336,19 @@ internal sealed class MnemosyneClient : IDisposable
     // Simulates connection loss (e.g. server restart) without waiting for an IO error.
     internal void DropForTest() => Drop();
 
+    private static string? ProcessPath(int pid)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+            return proc.MainModule?.FileName ?? proc.ProcessName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null; // gone already, or not ours to inspect
+        }
+    }
+
     private void Drop()
     {
         // Every disposal here can itself throw on a broken pipe — StreamWriter.Dispose
@@ -328,6 +359,8 @@ internal sealed class MnemosyneClient : IDisposable
         ServerApp = null;
         ServerExePath = null;
         ServerBuiltAt = null;
+        ServerProcessId = null;
+        ServerProcessPath = null;
         // The pipe first. Disposing the writer flushes it, and a flush is a synchronous write:
         // with the handle still open and the service slow to read (it is mid-build, or gone
         // quiet), that write waits - on the game's main thread, when this runs from the

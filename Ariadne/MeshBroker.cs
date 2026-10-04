@@ -92,6 +92,8 @@ internal sealed class MeshBroker : IDisposable
     /// <summary>The build of the service answering the pipe, so the window can name it beside the
     /// app: a log line alone let a week-old service go unnoticed for a week.</summary>
     public string? MnemosyneBuildPath => _client.ServerExePath;
+    public int? MnemosyneProcessId => _client.ServerProcessId;
+    public string? MnemosyneProcessPath => _client.ServerProcessPath;
     public string? MnemosyneBuiltAt => _client.ServerBuiltAt;
 
     private readonly MnemosyneClient _client;
@@ -350,7 +352,7 @@ internal sealed class MeshBroker : IDisposable
             return (resp, null);
         var problem = resp == null ? "Mnemosyne is not answering"
             : resp.Error?.Contains("unknown op", StringComparison.OrdinalIgnoreCase) == true
-                ? $"the running service is too old for this view ({_client.ServerExePath ?? "unknown build"}) - restart the game, or the service"
+                ? $"the running service is too old for this view ({_client.ServerExePath ?? _client.ServerProcessPath ?? "unknown build"}) - restart the game, or the service"
                 : $"{resp.Result ?? "failed"}: {resp.Error}";
         Activity($"meshNear: {problem}");
         return (null, problem);

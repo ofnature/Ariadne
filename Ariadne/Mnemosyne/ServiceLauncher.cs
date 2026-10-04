@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -78,28 +79,13 @@ internal static class ServiceLauncher
     /// the bundle. Once per ten minutes: a service that cannot be killed (another user's, or
     /// one that respawns from elsewhere) must not be fought every reconnect. Returns whether it
     /// acted.</summary>
-    public static bool Replace(string why, Action<string> log)
+    public static bool Replace(string why, Action<string> log, int? serverPid = null)
     {
         if (DateTime.UtcNow < _nextReplace)
             return false;
         _nextReplace = DateTime.UtcNow + ReplaceCooldown;
 
-        var killed = 0;
-        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(BundledService.ExeName)))
-        {
-            using (proc)
-            {
-                try
-                {
-                    proc.Kill();
-                    killed++;
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    log($"[Mnemosyne] could not stop the service (pid {proc.Id}): {ex.Message}");
-                }
-            }
-        }
+        var killed = Stop(serverPid, log);
         try
         {
             File.Delete(MarkerPath); // it names the build that just left; the bundle stamps its own
@@ -117,10 +103,34 @@ internal static class ServiceLauncher
     /// starts the one autostart resolves - the bundled build, or a development machine's own.
     /// The marker is kept: a dev build it names is the user's choice, and one naming an older
     /// staged bundle is already passed over by Resolve. Returns how many processes stopped.</summary>
-    public static int Restart(Action<string> log)
+    public static int Restart(Action<string> log, int? serverPid = null)
     {
+        var killed = Stop(serverPid, log);
+        _nextAttempt = DateTime.MinValue; // the pipe is about to be absent: launch on the next connect
+        log($"[Mnemosyne] restart asked for: stopped {killed} service process(es), the next connect starts one");
+        return killed;
+    }
+
+    /// <summary>Stop every Mnemosyne.Service, and the process actually serving the pipe when it
+    /// is known (MnemosyneClient.ServerProcessId) - an old stub or a renamed build answers under
+    /// another name, and stopping by name alone leaves it holding the pipe.</summary>
+    private static int Stop(int? serverPid, Action<string> log)
+    {
+        var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(BundledService.ExeName)).ToList();
+        if (serverPid is { } pid && processes.All(p => p.Id != pid))
+        {
+            try
+            {
+                processes.Add(Process.GetProcessById(pid));
+            }
+            catch (ArgumentException)
+            {
+                // it already exited
+            }
+        }
+
         var killed = 0;
-        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(BundledService.ExeName)))
+        foreach (var proc in processes)
         {
             using (proc)
             {
@@ -135,8 +145,6 @@ internal static class ServiceLauncher
                 }
             }
         }
-        _nextAttempt = DateTime.MinValue; // the pipe is about to be absent: launch on the next connect
-        log($"[Mnemosyne] restart asked for: stopped {killed} service process(es), the next connect starts one");
         return killed;
     }
 

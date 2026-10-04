@@ -46,6 +46,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly DtrProvider _dtr;
     private readonly WaypointOverlay _overlay;
     private readonly CollisionOverlay _collision;
+    private readonly MeshOverlay _meshOverlay;
     private readonly HuntMarks _hunts;
     private readonly AriadneIpc _ipc;
     private readonly VnavCompatIpc _vnavCompat;
@@ -123,8 +124,9 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
         _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
         _collision = new CollisionOverlay(_config, () => ObjectTable.LocalPlayer?.Position);
+        _meshOverlay = new MeshOverlay(_config, _broker, () => ObjectTable.LocalPlayer?.Position);
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _vnavCompat, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay, _collision, _hunts,
+            _config, SaveConfig, _broker, vnav, _vnavCompat, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay, _collision, _meshOverlay, _hunts,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
@@ -225,6 +227,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private void Draw()
     {
         using (MainThreadTrace.Enter("collision overlay")) _collision.Draw();
+        using (MainThreadTrace.Enter("mesh overlay")) _meshOverlay.Draw();
         using (MainThreadTrace.Enter("waypoint overlay")) _overlay.Draw();
         using (MainThreadTrace.Enter("window")) _windowSystem.Draw();
     }

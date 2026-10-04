@@ -172,6 +172,11 @@ internal sealed class MnemosyneClient : IDisposable
             MaxY = float.IsNaN(maxY) ? null : maxY,
         }, cancel);
 
+    /// <summary>The served mesh around a point, for the in-game overlay (spec'd 2026-10-04). A
+    /// server that predates it answers unknown-op.</summary>
+    public Task<MeshNearResponse?> MeshNearAsync(string cacheKey, float[] point, float radius, CancellationToken cancel = default)
+        => SendAsync<MeshNearResponse>(new Request { Op = "meshNear", CacheKey = cacheKey, Point = point, Radius = radius }, cancel);
+
     private async Task<TResp?> SendAsync<TResp>(Request request, CancellationToken cancel) where TResp : Response
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token, cancel);

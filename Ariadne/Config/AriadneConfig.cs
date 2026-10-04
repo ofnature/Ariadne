@@ -100,6 +100,13 @@ public sealed class AriadneConfig : IPluginConfiguration
     public bool ShowCollision { get; set; }
     /// <summary>How far around the player, in yalms, the collision view draws.</summary>
     public float CollisionRadius { get; set; } = 25f;
+    /// <summary>Draw the navmesh Mnemosyne serves around the player (vnavmesh's mesh view):
+    /// reachable, cut off and blocked polys, the mesh's walls, links and padded obstacles.</summary>
+    public bool ShowMesh { get; set; }
+    /// <summary>How far around the player, in yalms, the mesh view draws.</summary>
+    public float MeshRadius { get; set; } = 30f;
+    /// <summary>Fill the mesh view's polys as well as outlining them.</summary>
+    public bool MeshFill { get; set; } = true;
     /// <summary>While a consumer holds hunt-mark avoidance on (Ariadne.Avoid.HuntMarks), routes keep
     /// this many yalms clear of each mark, beyond its hitbox.</summary>
     public float HuntMarkAvoidRadius { get; set; } = 15f;

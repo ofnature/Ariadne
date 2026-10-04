@@ -337,6 +337,17 @@ internal sealed class MeshBroker : IDisposable
 
     private static Vector3? Point(float[]? v) => v is { Length: >= 3 } ? new Vector3(v[0], v[1], v[2]) : null;
 
+    /// <summary>The served mesh around a point, for the mesh overlay; null when there is no zone
+    /// or the service does not answer.</summary>
+    internal async Task<MeshNearResponse?> MeshNearAsync(Vector3 point, float radius)
+    {
+        var key = _currentKey;
+        if (key.Length == 0)
+            return null;
+        var resp = await _client.MeshNearAsync(key, [point.X, point.Y, point.Z], radius).ConfigureAwait(false);
+        return resp is { Ok: true } ? resp : null;
+    }
+
     // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------
     // Backs the Ariadne.Nav.* / Ariadne.Query.Mesh.* IPC gates. These exist so a consumer
     // can be pointed at Mnemosyne while vnavmesh is still installed and the answers

@@ -369,6 +369,39 @@ so the two pictures can be put side by side. They agree wherever a cell centre i
 diverge in the fringes: `reachmap`'s 20 y snap calls a cell reachable when *any* ground is
 within 20 y of it, while this op samples the centre, as specified.
 
+### `meshNear`  (spec'd and implemented both sides 2026-10-04)
+
+The served mesh around a point, as polygons, for Ariadne's in-game mesh view (Config → "Show
+navmesh around me"). Debugging only: no consumer should route from it.
+
+```json
+{"id":1,"op":"meshNear","cacheKey":"...","point":[x,y,z],"radius":30}
+```
+
+`radius` defaults to 30 y, at most 100. A poly is included when any vertex is within `radius`
+horizontally and vertically.
+
+```json
+{"id":1,"ok":true,"result":"ok","start":[x,y,z],
+ "counts":[4,3],"verts":[x,y,z, ...],"states":[1,2],"walls":[5,0],
+ "links":[[x1,y1,z1,x2,y2,z2]],"obstacles":[[x,y,z,radius,height]],"truncated":false}
+```
+
+| field | meaning |
+|---|---|
+| `counts`, `states`, `walls` | parallel, one entry per poly |
+| `verts` | each poly's vertices in order, `counts[i]` of them; served polys, overrides baked in |
+| `states` | 0 walkable (`point` off the mesh, so no reachability) · 1 reachable from `point` · 2 walkable but cut off from it · 3 blocked (fails the walk filter: override blocks, the step-height limit) |
+| `walls` | bit j set: edge j (vertex j to j+1) has no neighbour, so it is the mesh's edge |
+| `links` | off-mesh connections in the mesh and override links in range |
+| `obstacles` | what route padding keeps clear of: recorded obstacles and auto-found uncarved solids |
+| `start` | `point` snapped onto the mesh (the 5 y snap findPath uses); absent with result `startOffMesh` |
+| `truncated` | more than 4,000 polys in range; the rest are left out |
+
+Reachability is the zone-wide component from `start`, the same flood `reachableCells` uses,
+override links included. Measured at Eulmore's Canopy stair, radius 30: 225 polys, about 20 KB,
+10 ms once the zone is loaded.
+
 ### `transitions`  (spec'd 2026-09-29, Mnemosyne session — **not implemented yet**)
 
 The places in a zone where a character is moved, or knocked over, by something other than walking:

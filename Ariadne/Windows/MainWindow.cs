@@ -44,6 +44,7 @@ internal sealed class MainWindow : Window
     private readonly MoveRequest _move;
     private readonly WaypointOverlay _overlay;
     private readonly CollisionOverlay _collision;
+    private readonly MeshOverlay _meshOverlay;
     private readonly HuntMarks _hunts;
     private readonly Func<Vector3?> _playerPosition;
 
@@ -65,6 +66,7 @@ internal sealed class MainWindow : Window
         MoveRequest move,
         WaypointOverlay overlay,
         CollisionOverlay collision,
+        MeshOverlay meshOverlay,
         HuntMarks hunts,
         Func<Vector3?> playerPosition)
         // The version is in the title because it is the first thing anyone is asked when
@@ -74,6 +76,7 @@ internal sealed class MainWindow : Window
     {
         _overlay = overlay;
         _collision = collision;
+        _meshOverlay = meshOverlay;
         _hunts = hunts;
         _config = config;
         _saveConfig = saveConfig;
@@ -595,6 +598,24 @@ internal sealed class MainWindow : Window
             }
             ImGui.SameLine();
             ImGui.TextColored(Grey, $"{_collision.LineCount} lines{(_collision.Truncated ? " (capped - lower the radius)" : "")}");
+            ImGui.Unindent();
+        }
+        Toggle("Show navmesh around me", () => _config.ShowMesh, v => _config.ShowMesh = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The mesh Mnemosyne serves for this zone, like vnavmesh's mesh view: green reachable from where\nyou stand, yellow walkable but cut off from you, red blocked, grey when you are off the mesh.\nBright edges are the mesh's walls, cyan lines links, magenta rings obstacles routes pad round.");
+        if (_config.ShowMesh)
+        {
+            ImGui.Indent();
+            var radius = _config.MeshRadius;
+            ImGui.SetNextItemWidth(160);
+            if (ImGui.SliderFloat("Radius (yalms)##mesh", ref radius, 5f, 100f, "%.0f"))
+            {
+                _config.MeshRadius = Math.Clamp(radius, 5f, 100f);
+                _saveConfig();
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(Grey, $"{_meshOverlay.PolyCount} polys{(_meshOverlay.Truncated ? " (capped - lower the radius)" : "")}{(_meshOverlay.OnMesh ? "" : " - you are off the mesh")}");
+            Toggle("Fill polys", () => _config.MeshFill, v => _config.MeshFill = v);
             ImGui.Unindent();
         }
         Toggle("Enable server info bar entry (DTR)", () => _config.EnableDtrBar, v => _config.EnableDtrBar = v);

@@ -189,3 +189,18 @@ internal sealed class ReachableStatsResponse
     public int ReachablePolys { get; set; }
     public int WalkablePolys { get; set; }
 }
+
+/// <summary>meshNear: the served mesh's polys around a point, for the in-game mesh overlay.
+/// `counts`, `states` and `walls` are parallel, one per poly; `verts` holds each poly's
+/// vertices in order, `counts[i]` of them.</summary>
+internal sealed class MeshNearResponse : Response
+{
+    public float[]? Start { get; set; }       // the point snapped onto the mesh; absent off it
+    public int[]? Counts { get; set; }
+    public float[]? Verts { get; set; }       // x, y, z per vertex
+    public int[]? States { get; set; }        // 0 walkable (no start) · 1 reachable · 2 cutOff · 3 blocked
+    public int[]? Walls { get; set; }         // bit j: edge j (vertex j to j+1) has no neighbour
+    public float[][]? Links { get; set; }     // [x1, y1, z1, x2, y2, z2]
+    public float[][]? Obstacles { get; set; } // [x, y, z, radius, height]
+    public bool Truncated { get; set; }
+}

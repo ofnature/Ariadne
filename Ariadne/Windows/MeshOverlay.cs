@@ -56,6 +56,8 @@ internal sealed class MeshOverlay
     public int PolyCount => _snapshot?.Polys.Count ?? 0;
     public bool Truncated => _snapshot?.Truncated == true;
     public bool OnMesh => _snapshot?.OnMesh != false;
+    /// <summary>Why the last answer had nothing to draw; null when it did.</summary>
+    public string? Problem { get; private set; }
 
     public void Draw()
     {
@@ -118,7 +120,8 @@ internal sealed class MeshOverlay
 
     private async Task Fetch(Vector3 player, float radius)
     {
-        var resp = await _broker.MeshNearAsync(player, radius).ConfigureAwait(false);
+        var (resp, problem) = await _broker.MeshNearAsync(player, radius).ConfigureAwait(false);
+        Problem = problem;
         if (resp == null || !_config.ShowMesh)
         {
             _snapshot = null;

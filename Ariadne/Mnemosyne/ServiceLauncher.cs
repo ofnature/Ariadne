@@ -113,6 +113,33 @@ internal static class ServiceLauncher
         return true;
     }
 
+    /// <summary>The window's Restart button: stop every running service so the next connect
+    /// starts the one autostart resolves - the bundled build, or a development machine's own.
+    /// The marker is kept: a dev build it names is the user's choice, and one naming an older
+    /// staged bundle is already passed over by Resolve. Returns how many processes stopped.</summary>
+    public static int Restart(Action<string> log)
+    {
+        var killed = 0;
+        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(BundledService.ExeName)))
+        {
+            using (proc)
+            {
+                try
+                {
+                    proc.Kill();
+                    killed++;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    log($"[Mnemosyne] could not stop the service (pid {proc.Id}): {ex.Message}");
+                }
+            }
+        }
+        _nextAttempt = DateTime.MinValue; // the pipe is about to be absent: launch on the next connect
+        log($"[Mnemosyne] restart asked for: stopped {killed} service process(es), the next connect starts one");
+        return killed;
+    }
+
     public static string? ResolveExe(string? configured) => ResolveExe(configured, out _);
 
     /// <summary>Resolve the service exe, and say what failed when it cannot. The reason

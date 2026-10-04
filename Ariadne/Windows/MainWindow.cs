@@ -139,6 +139,12 @@ internal sealed class MainWindow : Window
         if (_broker.MnemosyneConnected && _broker.MnemosyneBuildPath is { } build)
             DrawRunningBuild(build);
 
+        if (ImGui.Button("Restart service"))
+            ServiceLauncher.Restart(m => Service.Log.Information(m));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Stops every Mnemosyne service on this PC; the next connect starts the right one (the\nservice this Ariadne ships, or the build service.path names). Use it when an old service\nkeeps answering after an update. Every game client loses the service for a few seconds,\nand a mesh build in progress is lost."
+                + (_config.AutoStartMnemosyne ? "" : "\n\n\"Start the service when nothing is listening\" is off, so nothing will start it again."));
+
         _broker.PollServiceBuild();
         if (_broker.MnemosyneConnected && _broker.ServiceBuild is { } building)
         {
@@ -615,6 +621,8 @@ internal sealed class MainWindow : Window
             }
             ImGui.SameLine();
             ImGui.TextColored(Grey, $"{_meshOverlay.PolyCount} polys{(_meshOverlay.Truncated ? " (capped - lower the radius)" : "")}{(_meshOverlay.OnMesh ? "" : " - you are off the mesh")}");
+            if (_meshOverlay.Problem is { } meshProblem)
+                ImGui.TextColored(Red, $"Nothing to draw: {meshProblem}");
             Toggle("Fill polys", () => _config.MeshFill, v => _config.MeshFill = v);
             ImGui.Unindent();
         }

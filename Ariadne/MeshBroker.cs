@@ -337,15 +337,23 @@ internal sealed class MeshBroker : IDisposable
 
     private static Vector3? Point(float[]? v) => v is { Length: >= 3 } ? new Vector3(v[0], v[1], v[2]) : null;
 
-    /// <summary>The served mesh around a point, for the mesh overlay; null when there is no zone
-    /// or the service does not answer.</summary>
-    internal async Task<MeshNearResponse?> MeshNearAsync(Vector3 point, float radius)
+    /// <summary>The served mesh around a point, for the mesh overlay, or why there is none to
+    /// draw. An overlay that silently drew nothing on a PC still running a service from before
+    /// meshNear (2026-10-04) looked exactly like a broken overlay.</summary>
+    internal async Task<(MeshNearResponse? Mesh, string? Problem)> MeshNearAsync(Vector3 point, float radius)
     {
         var key = _currentKey;
         if (key.Length == 0)
-            return null;
+            return (null, "no mesh for this zone yet");
         var resp = await _client.MeshNearAsync(key, [point.X, point.Y, point.Z], radius).ConfigureAwait(false);
-        return resp is { Ok: true } ? resp : null;
+        if (resp is { Ok: true })
+            return (resp, null);
+        var problem = resp == null ? "Mnemosyne is not answering"
+            : resp.Error?.Contains("unknown op", StringComparison.OrdinalIgnoreCase) == true
+                ? $"the running service is too old for this view ({_client.ServerExePath ?? "unknown build"}) - restart the game, or the service"
+                : $"{resp.Result ?? "failed"}: {resp.Error}";
+        Activity($"meshNear: {problem}");
+        return (null, problem);
     }
 
     // ---- vnavmesh gate parity (added 2026-08-24) --------------------------------------

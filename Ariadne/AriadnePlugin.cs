@@ -45,6 +45,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
     private readonly TeleportService _teleports;
     private readonly DtrProvider _dtr;
     private readonly WaypointOverlay _overlay;
+    private readonly CollisionOverlay _collision;
+    private readonly HuntMarks _hunts;
     private readonly AriadneIpc _ipc;
     private readonly VnavCompatIpc _vnavCompat;
     private readonly MainWindow _mainWindow;
@@ -108,8 +110,11 @@ public sealed class AriadnePlugin : IDalamudPlugin
             id => ObjectTable.SearchById(id) is { } o ? (o.Position, o.HitboxRadius) : null,
             _teleports, new FlightControl(), m => { Log.Information(m); MainThreadTrace.Note(m); });
 
+        _hunts = new HuntMarks(_config, m => Log.Information(m));
+        _broker.AvoidMarks = () => _hunts.Nearby;
+        _move.Hunts = _hunts;
         _ipc = new AriadneIpc(PluginInterface, _broker, () => _zoneWatcher.CurrentCacheKey, _follower, _move,
-            () => _config.SyncGateBudgetMs, () => _vnavCompat?.Owned == true);
+            () => _config.SyncGateBudgetMs, () => _vnavCompat?.Owned == true, _hunts);
 
         // Registers nothing until its first Tick, so the window lambdas never run before
         // _mainWindow is assigned.
@@ -117,8 +122,9 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => _mainWindow!.IsOpen, v => _mainWindow!.IsOpen = v, m => Log.Information(m));
 
         _overlay = new WaypointOverlay(_config, _follower, () => ObjectTable.LocalPlayer?.Position);
+        _collision = new CollisionOverlay(_config, () => ObjectTable.LocalPlayer?.Position);
         _mainWindow = new MainWindow(
-            _config, SaveConfig, _broker, vnav, _vnavCompat, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay,
+            _config, SaveConfig, _broker, vnav, _vnavCompat, _zoneWatcher, _tracker, _pusher, _follower, _move, _overlay, _collision, _hunts,
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
@@ -208,6 +214,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         MainThreadTrace.Heartbeat();
         using (MainThreadTrace.Enter("ready tracker")) _tracker.Tick();
         using (MainThreadTrace.Enter("compat gate policy")) _vnavCompat.Tick();
+        using (MainThreadTrace.Enter("hunt marks")) _hunts.Tick(ClientState.TerritoryType, ObjectTable.LocalPlayer?.Position);
         using (MainThreadTrace.Enter("game state push")) _pusher.Tick();
         using (MainThreadTrace.Enter("path follower")) _follower.Update(fwk);
         using (MainThreadTrace.Enter("move request update")) _move.Update();
@@ -217,6 +224,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
 
     private void Draw()
     {
+        using (MainThreadTrace.Enter("collision overlay")) _collision.Draw();
         using (MainThreadTrace.Enter("waypoint overlay")) _overlay.Draw();
         using (MainThreadTrace.Enter("window")) _windowSystem.Draw();
     }

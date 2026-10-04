@@ -95,6 +95,14 @@ public sealed class AriadneConfig : IPluginConfiguration
     public bool DtrShowDetail { get; set; } = true;
     /// <summary>Draw the active path's waypoints in the world while following.</summary>
     public bool ShowWaypoints { get; set; } = true;
+    /// <summary>Draw the game's live collision around the player as wireframe (vnavmesh's
+    /// collision view), to check a route against what the character actually bumps into.</summary>
+    public bool ShowCollision { get; set; }
+    /// <summary>How far around the player, in yalms, the collision view draws.</summary>
+    public float CollisionRadius { get; set; } = 25f;
+    /// <summary>While a consumer holds hunt-mark avoidance on (Ariadne.Avoid.HuntMarks), routes keep
+    /// this many yalms clear of each mark, beyond its hitbox.</summary>
+    public float HuntMarkAvoidRadius { get; set; } = 15f;
 
     /// <summary>Also publish the shared-data flag under vnavmesh's name
     /// (<c>vnav.PathIsRunning</c>) so plugins that yield movement to vnavmesh — BossMod's

@@ -1,6 +1,7 @@
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 using System;
+using System.Linq;
 
 namespace Ariadne.Ipc;
 
@@ -30,12 +31,40 @@ internal sealed class VnavIpc
         _log = log;
     }
 
+    // Whether the vnavmesh plugin itself is loaded, per Dalamud's plugin list, re-read every 2 s.
+    // An answer on the vnavmesh.* names is not enough: found 2026-10-02 on a client with vnavmesh
+    // disabled, something still answered Nav.IsReady (false), so Ariadne showed "no mesh
+    // loaded", held its mesh-ready timer open for minutes, and sent a reload into the void.
+    private bool _pluginLoaded;
+    private long _pluginCheckedMs = long.MinValue;
+
+    private bool PluginLoaded
+    {
+        get
+        {
+            var now = Environment.TickCount64;
+            if (now - _pluginCheckedMs > 2000)
+            {
+                _pluginCheckedMs = now;
+                try
+                {
+                    _pluginLoaded = _pluginInterface.InstalledPlugins.Any(p => p.IsLoaded && p.InternalName == "vnavmesh");
+                }
+                catch (InvalidOperationException)
+                {
+                    // the list changed while we read it: keep the last answer
+                }
+            }
+            return _pluginLoaded;
+        }
+    }
+
     /// <summary>vnavmesh is loaded and answering IPC.</summary>
     public bool IsAvailable
     {
         get
         {
-            if (_compatOwnsGates())
+            if (_compatOwnsGates() || !PluginLoaded)
                 return false;
             try
             {
@@ -61,7 +90,7 @@ internal sealed class VnavIpc
     {
         get
         {
-            if (_compatOwnsGates())
+            if (_compatOwnsGates() || !PluginLoaded)
                 return -1;
             try
             {
@@ -82,7 +111,7 @@ internal sealed class VnavIpc
 
     private bool Try(Func<bool> call)
     {
-        if (_compatOwnsGates())
+        if (_compatOwnsGates() || !PluginLoaded)
             return false;
         try
         {

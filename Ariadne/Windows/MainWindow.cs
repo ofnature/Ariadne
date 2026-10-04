@@ -7,6 +7,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 
@@ -42,6 +43,8 @@ internal sealed class MainWindow : Window
     private readonly PathFollower _follower;
     private readonly MoveRequest _move;
     private readonly WaypointOverlay _overlay;
+    private readonly CollisionOverlay _collision;
+    private readonly HuntMarks _hunts;
     private readonly Func<Vector3?> _playerPosition;
 
     private Vector3 _pathDest;
@@ -61,6 +64,8 @@ internal sealed class MainWindow : Window
         PathFollower follower,
         MoveRequest move,
         WaypointOverlay overlay,
+        CollisionOverlay collision,
+        HuntMarks hunts,
         Func<Vector3?> playerPosition)
         // The version is in the title because it is the first thing anyone is asked when
         // something goes wrong, and there was nowhere to read it. The id after ## is what ImGui
@@ -68,6 +73,8 @@ internal sealed class MainWindow : Window
         : base($"Ariadne v{AriadnePlugin.PluginVersion}##AriadneMain") // no NoCollapse — the title-bar arrow minimizes it
     {
         _overlay = overlay;
+        _collision = collision;
+        _hunts = hunts;
         _config = config;
         _saveConfig = saveConfig;
         _broker = broker;
@@ -99,6 +106,7 @@ internal sealed class MainWindow : Window
             DrawMnemosyne();
             DrawZone();
             DrawVnavmesh();
+            DrawHuntMarks();
             DrawActions();
             DrawMovement();
             DrawTimings();
@@ -127,6 +135,14 @@ internal sealed class MainWindow : Window
 
         if (_broker.MnemosyneConnected && _broker.MnemosyneBuildPath is { } build)
             DrawRunningBuild(build);
+
+        _broker.PollServiceBuild();
+        if (_broker.MnemosyneConnected && _broker.ServiceBuild is { } building)
+        {
+            ImGui.TextColored(Yellow, building.ThisZone ? "building this zone" : "building another zone");
+            ImGui.SameLine();
+            ImGui.ProgressBar(building.Progress, new Vector2(-1, 0), $"{building.Progress * 100:0}%");
+        }
 
         ImGui.TextColored(Grey, "game link");
         ImGui.SameLine(90);
@@ -204,6 +220,22 @@ internal sealed class MainWindow : Window
         ImGui.Separator();
     }
 
+    private void DrawHuntMarks()
+    {
+        ImGui.TextUnformatted("Hunt marks");
+        ImGui.SameLine();
+        var holders = _hunts.Holders;
+        if (holders.Length == 0)
+            ImGui.TextColored(Grey, _hunts.ZoneMarkCount > 0 ? $"not avoided ({_hunts.ZoneMarkCount} in this zone)" : "none in this zone");
+        else
+        {
+            var near = _hunts.Nearby;
+            ImGui.TextColored(near.Length > 0 ? Yellow : Green,
+                $"avoiding for {string.Join(", ", holders)} — {(near.Length == 0 ? "none nearby" : string.Join(", ", near.Select(m => m.Name)))}");
+        }
+        ImGui.Separator();
+    }
+
     private void DrawActions()
     {
         if (ImGui.Button("Refresh"))
@@ -214,6 +246,17 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         if (ImGui.Button("Reload vnavmesh"))
             _vnav.Reload();
+        ImGui.SameLine();
+        // grey: a capture would build the same mesh. Lit: the service says it would change it.
+        var reason = _broker.RecaptureReason;
+        ImGui.BeginDisabled(reason == null);
+        if (ImGui.Button("Capture zone"))
+            _ = _broker.CaptureCurrentZoneAsync();
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(reason != null
+                ? $"Push this: {reason}.\nSends this zone's live layout to Mnemosyne and rebuilds it (same as /ariadne capture)."
+                : "Nothing to do: a capture would build the same mesh this zone already has.\n/ariadne capture still forces one (festival or shared-group variants).");
         ImGui.Separator();
     }
 
@@ -528,6 +571,32 @@ internal sealed class MainWindow : Window
 
         ImGui.TextColored(Grey, "Overlay & info bar");
         Toggle("Show active waypoints", () => _config.ShowWaypoints, v => _config.ShowWaypoints = v);
+        var huntRadius = _config.HuntMarkAvoidRadius;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.SliderFloat("Hunt mark clearance (yalms)", ref huntRadius, 5f, 40f, "%.0f"))
+        {
+            _config.HuntMarkAvoidRadius = Math.Clamp(huntRadius, 5f, 40f);
+            _saveConfig();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("While a plugin holds hunt-mark avoidance on (Odysseus does while it drives), walking routes\nkeep this far from each B/A/S mark, beyond its hitbox. Off unless a plugin asks.");
+        Toggle("Show game collision around me", () => _config.ShowCollision, v => _config.ShowCollision = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The game's live collision as wireframe, like vnavmesh's collision view: green floor, grey\nwalls and steep ground, red never-walkable (zone edges), blue fly-through, magenta boxes\nand cylinders. Shows what the character bumps into, so a route through a solid rock stands out.");
+        if (_config.ShowCollision)
+        {
+            ImGui.Indent();
+            var radius = _config.CollisionRadius;
+            ImGui.SetNextItemWidth(160);
+            if (ImGui.SliderFloat("Radius (yalms)", ref radius, 5f, 100f, "%.0f"))
+            {
+                _config.CollisionRadius = Math.Clamp(radius, 5f, 100f);
+                _saveConfig();
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(Grey, $"{_collision.LineCount} lines{(_collision.Truncated ? " (capped - lower the radius)" : "")}");
+            ImGui.Unindent();
+        }
         Toggle("Enable server info bar entry (DTR)", () => _config.EnableDtrBar, v => _config.EnableDtrBar = v);
         if (_config.EnableDtrBar)
         {

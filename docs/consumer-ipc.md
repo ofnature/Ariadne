@@ -62,6 +62,30 @@ poll it instead of try/catching gate calls.
 | `Ariadne.SimpleMove.GetUseAetherytes` / `SetUseAetherytes` | `() → bool` / `(bool)` | teleport legs on/off for this session (overrides the config toggle) |
 | `Ariadne.SimpleMove.GetPreferFlying` / `SetPreferFlying` | `() → bool` / `(bool)` | fly-when-able on/off for this session (overrides the config toggle) |
 
+**Keeping clear of hunt marks** (spec'd 2026-10-02, for Odysseus driving MSQ, side quests and
+aether currents):
+
+| Gate | Signature | Notes |
+|---|---|---|
+| `Ariadne.Avoid.HuntMarks` | `(string owner, int seconds) → bool` | for the next `seconds`, every walking route Ariadne plans keeps clear of the live B/A/S hunt marks near the player; renew before it lapses, `seconds` 0 releases your hold. Returns whether avoidance is now on |
+| `Ariadne.Avoid.HuntMarksActive` | `() → bool` | any owner's hold is still running |
+
+It is a hold, not a setting. Call it when you start driving and renew it while you do (every
+minute or so with `seconds` 120); it switches itself off when nobody renews it. A consumer that
+stops or crashes cannot leave every later route avoiding marks. Each owner's hold is separate,
+and avoidance is on while any one is running.
+
+While on, Ariadne finds the live marks within 150 y of the player every half second. A mark is
+any battle NPC whose base id is in the game's hunt-mark sheet (`NotoriousMonster`, every rank,
+every expansion). Each mark becomes a circle of its hitbox plus `HuntMarkAvoidRadius` (config,
+default 15 y) and is sent with every path request (`findPath` `avoid`). A walking move that is
+already under way re-plans when a mark wanders into its remaining route. Fly legs ignore it:
+marks do not aggro a flying mount. What it never does:
+- **Refuse a route.** A circle never covers the start or the goal (a quest NPC beside an A rank
+  is still reached). When the circles seal the only way through, the route goes through anyway,
+  marked `avoidIgnored`.
+- **Avoid paths you supplied** (`Path.MoveTo`). Your path is yours.
+
 Stall recovery is built in, two detectors: hard stall (displacement below threshold —
 frozen against a wall) and soft stall (not closing on the destination — the ±4y
 tree-wobble that defeats displacement checks). On either, Ariadne re-paths from the

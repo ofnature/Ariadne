@@ -1,6 +1,7 @@
-using Ariadne.Config;
+﻿using Ariadne.Config;
 using Ariadne.Travel;
 using System;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 
@@ -9,7 +10,7 @@ namespace Ariadne.Movement;
 // "Get me to the goal": optionally teleports first (Lifestream, when an attuned aetheryte
 // beats travelling directly), asks the broker (Mnemosyne) for a path off-thread, hands the
 // result to the follower on the framework thread, checks the goal live while following,
-// and owns stall recovery — on a stall it re-paths from the current position, budgeted by
+// and owns stall recovery â€” on a stall it re-paths from the current position, budgeted by
 // ground gained. Ported from vnavmesh's AsyncMoveRequest; goals, teleport legs and the
 // retry loop are the new parts.
 internal sealed class MoveRequest : IDisposable
@@ -19,18 +20,24 @@ internal sealed class MoveRequest : IDisposable
     public string LastResult { get; private set; } = "";
     public int RetriesUsed { get; private set; }
 
-    /// <summary>"teleporting to X…" while a teleport leg is in flight; "" otherwise.</summary>
-    public string TeleportStatus => _teleport is { } t ? $"teleporting to {t.Name}…" : "";
+    /// <summary>"teleporting to Xâ€¦" while a teleport leg is in flight; "" otherwise.</summary>
+    public string TeleportStatus => _teleport is { } t ? $"teleporting to {t.Name}â€¦" : "";
 
     /// <summary>What the move is doing while nothing is being followed yet, for the window.</summary>
     public string PhaseText => _teleport != null ? TeleportStatus
-        : _held != null ? "calling the mount…"
-        : _dismounting ? "putting the mount away…"
-        : "pathfinding…";
+        : _held != null ? "calling the mountâ€¦"
+        : _dismounting ? "putting the mount awayâ€¦"
+        : "pathfindingâ€¦";
 
     /// <summary>Per-session override of config.PreferFlying (set over IPC); null = config.</summary>
     public bool? PreferFlyingOverride { get; set; }
     public bool PreferFlying => PreferFlyingOverride ?? _config.PreferFlying;
+
+    /// <summary>Hunt marks to keep clear of (set by the plugin). A walking move re-plans when one
+    /// wanders onto its remaining route.</summary>
+    public HuntMarks? Hunts { get; set; }
+    private HuntMarks.Mark[] _plannedMarks = []; // the marks the current route was planned around
+    private DateTime _nextHuntCheck;
 
     /// <summary>Per-session override of config.UseAetherytes (set over IPC); null = config.</summary>
     public bool? UseAetherytesOverride { get; set; }
@@ -77,12 +84,22 @@ internal sealed class MoveRequest : IDisposable
     /// error: the route ends on the mesh's version of the point, not the caller's.</summary>
     internal const float ExactArrivalSlack = 1f;
 
+    /// <summary>How far above or below an exact destination still counts as on it, when the
+    /// planner said its route stops short: more than a guessed height is ever off by.</summary>
+    internal const float ExactVerticalSlack = 3f;
+    private bool _routeShort; // the planner said the current route does not reach the goal
+
     /// <summary>What a finished route amounts to. A ranged goal is reached only inside its
     /// range; anything else names how far short the closest reachable point was, so a
     /// consumer retrying on LastResult knows that retrying will not help.</summary>
-    internal static string DescribeEnd(IGoal goal, Vector3 player)
+    internal static string DescribeEnd(IGoal goal, Vector3 player, bool routeShort = false)
     {
         var outside = goal.DistanceOutside(player);
+        // An exact spot ignores height (callers pass guessed heights, map flags among them) -
+        // but not when the planner itself said the route stops short and we ended well above
+        // or below the target. Eulmore's aetheryte, 2026-10-02: "goal reached" 34 y under it.
+        if (routeShort && goal.PlannerTolerance <= 0 && MathF.Abs(player.Y - goal.Target.Y) > ExactVerticalSlack)
+            outside = Vector3.Distance(player, goal.Target);
         var slack = goal.PlannerTolerance > 0 ? 0f : ExactArrivalSlack;
         return outside <= slack ? "goal reached" : $"closest reachable point, {outside:0.0}y short";
     }
@@ -146,6 +163,7 @@ internal sealed class MoveRequest : IDisposable
             LastResult = "no player";
             return false;
         }
+        _plannedMarks = Hunts?.Nearby ?? [];
 
         RetriesUsed = 0;
         _meshWait.Reset();
@@ -162,11 +180,11 @@ internal sealed class MoveRequest : IDisposable
         {
             fly = true;
             _upgraded = true;
-            _log($"[Move] flight is unlocked here and {goal.Describe()} is {TeleportPlanner.Horizontal(from.Value, goal.Target):0}y away — flying instead of walking");
+            _log($"[Move] flight is unlocked here and {goal.Describe()} is {TeleportPlanner.Horizontal(from.Value, goal.Target):0}y away â€” flying instead of walking");
         }
         _fly = fly;
 
-        // Teleport leg first when a crystal wins on ETA. Ariadne's own surface only — the
+        // Teleport leg first when a crystal wins on ETA. Ariadne's own surface only â€” the
         // vnavmesh.* compat gates never reach here with aetherytes on. Escapes never teleport.
         if (smart && UseAetherytes && _teleports != null && goal is not GoalAway)
         {
@@ -179,10 +197,10 @@ internal sealed class MoveRequest : IDisposable
                     _teleportIdleSince = null;
                     _landed = false;
                     LastResult = TeleportStatus;
-                    _log($"[Move] {goal.Describe()} is {plan.DirectSeconds:0}s direct, {plan.ViaSeconds:0}s via {plan.Name} — teleporting first");
+                    _log($"[Move] {goal.Describe()} is {plan.DirectSeconds:0}s direct, {plan.ViaSeconds:0}s via {plan.Name} â€” teleporting first");
                     return true;
                 }
-                _log($"[Move] Lifestream declined the teleport to {plan.Name} — going direct");
+                _log($"[Move] Lifestream declined the teleport to {plan.Name} â€” going direct");
             }
             else if (why.Length > 0)
             {
@@ -214,7 +232,7 @@ internal sealed class MoveRequest : IDisposable
     /// Dropping the path is the only honest answer, whoever supplied the waypoints.
     ///
     /// The test is the territory, not the cache key. A festival layer or a shared-group state
-    /// changes the key inside one zone — the mesh changed, the coordinates did not — and a
+    /// changes the key inside one zone â€” the mesh changed, the coordinates did not â€” and a
     /// consumer-supplied path there is still its owner's to keep
     /// (docs/externally-supplied-paths.md).
     /// </summary>
@@ -233,7 +251,7 @@ internal sealed class MoveRequest : IDisposable
 
         Stop();
         LastResult = "zone changed";
-        _log($"[Move] zone changed ({previous} -> {territory}) — path dropped, the old coordinates mean nothing here");
+        _log($"[Move] zone changed ({previous} -> {territory}) â€” path dropped, the old coordinates mean nothing here");
     }
 
     /// <summary>Framework-thread tick: drives the teleport leg, promotes a finished pathfind
@@ -303,10 +321,48 @@ internal sealed class MoveRequest : IDisposable
         var drift = Vector3.Distance(_goal.Target, _plannedTarget);
         if (drift > GoalDriftRepath)
         {
-            _log($"[Move] goal moved {drift:0}y since the path was planned — re-pathing");
+            _log($"[Move] goal moved {drift:0}y since the path was planned â€” re-pathing");
+            _follower.Stop();
+            Request();
+            return;
+        }
+        if (!overhead && _flight is not { IsFlying: true } && HuntMarkOnRoute(pos) is { } mark)
+        {
+            _log($"[Move] {mark.Name} is on the route ahead â€” re-pathing around it");
             _follower.Stop();
             Request();
         }
+    }
+
+    /// <summary>A hunt mark the route was not planned around, sitting on what is left of it.
+    /// Checked once a second. Marks the route already went around (or had to go through, when
+    /// they sealed the only way) do not count, nor one the player or the goal is inside: no
+    /// re-plan can do better there.</summary>
+    private HuntMarks.Mark? HuntMarkOnRoute(Vector3 pos)
+    {
+        if (Hunts is null || _goal is null || DateTime.UtcNow < _nextHuntCheck)
+            return null;
+        _nextHuntCheck = DateTime.UtcNow.AddSeconds(1);
+        var marks = Hunts.Nearby;
+        if (marks.Length == 0)
+            return null;
+        var route = _follower.Waypoints;
+        foreach (var m in marks)
+        {
+            if (_plannedMarks.Any(p => Vector3.Distance(p.Center, m.Center) < 5f))
+                continue;
+            if (HuntMarks.DistanceToSegment(m.Center, pos, pos) <= m.Radius
+                || HuntMarks.DistanceToSegment(m.Center, _goal.Target, _goal.Target) <= m.Radius)
+                continue;
+            var prev = pos;
+            foreach (var w in route)
+            {
+                if (HuntMarks.DistanceToSegment(m.Center, prev, w) < m.Radius)
+                    return m;
+                prev = w;
+            }
+        }
+        return null;
     }
 
     // The follower emptied the path itself. Arrival is judged against the goal, never against
@@ -322,7 +378,7 @@ internal sealed class MoveRequest : IDisposable
             _log($"[Move] stopped before reaching {goal.Describe()}");
             return;
         }
-        var result = DescribeEnd(goal, pos);
+        var result = DescribeEnd(goal, pos, _routeShort);
         Finish(result, $"[Move] route to {goal.Describe()} ended: {result}");
     }
 
@@ -362,7 +418,7 @@ internal sealed class MoveRequest : IDisposable
         else if (_mount.GaveUp)
         {
             _held = null;
-            _log("[Move] the mount would not come out — walking instead");
+            _log("[Move] the mount would not come out â€” walking instead");
             _fly = false;
             _upgraded = false;
             Request();
@@ -387,7 +443,7 @@ internal sealed class MoveRequest : IDisposable
         else if (_dismount.GaveUp)
         {
             _dismounting = false;
-            _log("[Move] the mount would not go away — leaving it out");
+            _log("[Move] the mount would not go away â€” leaving it out");
         }
     }
 
@@ -404,9 +460,9 @@ internal sealed class MoveRequest : IDisposable
         {
             // The service answers `meshNotReady` while it is still decoding the zone's volume, off
             // the request (measured: ~1.9 s for a field zone). Retrying is the whole point of the
-            // result — see MeshWait, and the consumer contract in MeshBroker.
+            // result â€” see MeshWait, and the consumer contract in MeshBroker.
             LastResult = "waiting for mesh";
-            _log($"[Move] this zone's volume is still loading — retrying in {_meshWait.RetryDelayMs} ms ({_meshWait.Retries}/{_meshWait.MaxRetries})");
+            _log($"[Move] this zone's volume is still loading â€” retrying in {_meshWait.RetryDelayMs} ms ({_meshWait.Retries}/{_meshWait.MaxRetries})");
             return; // the goal stays: we still want to go there
         }
         if (answer.Waypoints.Count == 0)
@@ -421,6 +477,7 @@ internal sealed class MoveRequest : IDisposable
         LastResult = $"{answer.Waypoints.Count} waypoints";
         _plannedTarget = _goal?.Target ?? answer.Waypoints[^1];
         _tail = answer.StraightTail;
+        _routeShort = answer.Partial || answer.Result is "noRouteOnMesh" or "targetOffMesh";
         // ours: stall recovery may re-path it, and its legs are ours to execute (mode switches
         // and the `land` transition; mount/dismount/teleport are logged, not performed yet).
         // Destination tolerance 0 on purpose. The follower measures it against the route's LAST
@@ -434,8 +491,8 @@ internal sealed class MoveRequest : IDisposable
         {
             _held = answer;
             _mount.Reset();
-            LastResult = "calling the mount…";
-            _log($"[Move] the route to {_goal?.Describe()} flies — calling the mount first");
+            LastResult = "calling the mountâ€¦";
+            _log($"[Move] the route to {_goal?.Describe()} flies â€” calling the mount first");
             return;
         }
         Follow(answer);
@@ -449,7 +506,7 @@ internal sealed class MoveRequest : IDisposable
                 + $"({answer.Waypoints[0].Y - at.Y:+0.0;-0.0}y from your feet), last {answer.Waypoints[^1]:f1}");
         // Steer it as what it is, not as what was asked for: a fly request the planner answered
         // with the ground ("groundFaster") is a walk route, and followed as a flight every rising
-        // waypoint was a takeoff attempt — a jump, a glide, a landing, over and over.
+        // waypoint was a takeoff attempt â€” a jump, a glide, a landing, over and over.
         var flies = FlightPreference.NeedsFlight(answer.Legs, answer.Result, _fly);
         _follower.Move(answer.Waypoints, flies, destinationTolerance: 0, external: false, legs: answer.Legs);
         _following = true;
@@ -463,7 +520,7 @@ internal sealed class MoveRequest : IDisposable
         {
             _teleport = null;
             LastResult = _landed ? $"landed at {plan.Name} but the zone never became ready" : $"teleport to {plan.Name} never landed";
-            _log($"[Move] {LastResult} — giving up");
+            _log($"[Move] {LastResult} â€” giving up");
             _goal = null;
             return;
         }
@@ -483,7 +540,7 @@ internal sealed class MoveRequest : IDisposable
             if (!_broker.NavIsReady)
                 return;
             _teleport = null;
-            _log($"[Move] landed at {plan.Name} — pathing on to {_goal!.Describe()}");
+            _log($"[Move] landed at {plan.Name} â€” pathing on to {_goal!.Describe()}");
             Request();
             return;
         }
@@ -493,7 +550,7 @@ internal sealed class MoveRequest : IDisposable
         if (now - _teleportIdleSince > TeleportIdleGrace)
         {
             _teleport = null;
-            _log($"[Move] teleport to {plan.Name} never started — going direct");
+            _log($"[Move] teleport to {plan.Name} never started â€” going direct");
             Request();
         }
     }
@@ -513,7 +570,7 @@ internal sealed class MoveRequest : IDisposable
         }
         var goal = _goal!;
         _following = false;
-        LastResult = "pathfinding…";
+        LastResult = "pathfindingâ€¦";
         _log($"[Move] {(_fly ? "fly" : "walk")} to {goal.Describe()}");
         // Hand the range to the planner as a goal tolerance, not just to the follower. An NPC
         // behind a counter is an off-mesh goal: without a tolerance the server can only answer
@@ -572,7 +629,7 @@ internal sealed class MoveRequest : IDisposable
             return answer;
 
         _log($"[Move] the route begins {RouteSanity.Describe(offset)} at {answer.Waypoints[0]:f1}: the mesh has no "
-            + $"surface where you stand ({from:f1}) and the start fell onto another level — looking for the surface nearby");
+            + $"surface where you stand ({from:f1}) and the start fell onto another level â€” looking for the surface nearby");
         var surface = await _broker.NearestPointAsync(from, SurfaceSearchRadius, RouteSanity.MaxStartOffset, reachableOnly: false)
             .ConfigureAwait(false);
         if (surface is { } s && MathF.Abs(s.Y - from.Y) <= RouteSanity.MaxStartOffset)
@@ -584,7 +641,7 @@ internal sealed class MoveRequest : IDisposable
                 return retry;
             }
         }
-        _log("[Move] no surface within reach to plan from — refusing the route that runs on the other level");
+        _log("[Move] no surface within reach to plan from â€” refusing the route that runs on the other level");
         return new MeshBroker.PathAnswer("startOffSurface", [], surface, false);
     }
 
@@ -613,7 +670,7 @@ internal sealed class MoveRequest : IDisposable
     private void OnStalled(Vector3 destination, bool fly, float range)
     {
         // Externally-supplied paths (Path.MoveTo) are not ours to recover: their waypoints
-        // may encode knowledge the mesh lacks — Minerva's dodge corners bend around AOEs a
+        // may encode knowledge the mesh lacks â€” Minerva's dodge corners bend around AOEs a
         // mesh re-path would walk straight through. Leave the path running; the owner polls
         // Path.StallCount and re-plans with the geometry knowledge it actually has.
         if (_follower.IsExternalPath || _goal == null)
@@ -625,18 +682,18 @@ internal sealed class MoveRequest : IDisposable
         {
             var goal = _goal;
             _follower.Stop();
-            var result = _playerPosition() is { } here ? DescribeEnd(goal, here) : "stopped";
+            var result = _playerPosition() is { } here ? DescribeEnd(goal, here, _routeShort) : "stopped";
             Finish(result, $"[Move] blocked on the stretch past the end of the mesh, toward {goal.Describe()}: {result}");
             return;
         }
 
         // Attempts are budgeted by ground gained, not by count: a re-path that closed
-        // ProgressMinGain since the last one clears the futility count (Odysseus's rule —
+        // ProgressMinGain since the last one clears the futility count (Odysseus's rule â€”
         // progress buys the clock back). Only consecutive futile recoveries give up.
         var remaining = _playerPosition() is { } pos ? (destination - pos).Length() : float.MaxValue;
         if (_futility.RecordAttempt(remaining))
         {
-            _log($"[Move] {_futility.FutileAttempts} recoveries without gaining ground — giving up ({remaining:0}y short)");
+            _log($"[Move] {_futility.FutileAttempts} recoveries without gaining ground â€” giving up ({remaining:0}y short)");
             LastResult = $"stuck ({remaining:0}y short)";
             _follower.Stop();
             _goal = null;
@@ -644,7 +701,7 @@ internal sealed class MoveRequest : IDisposable
         }
 
         RetriesUsed++;
-        _log($"[Move] stalled at {remaining:0}y out — re-pathing (futile {_futility.FutileAttempts}/{_config.StallRetries})");
+        _log($"[Move] stalled at {remaining:0}y out â€” re-pathing (futile {_futility.FutileAttempts}/{_config.StallRetries})");
         _follower.Stop();
         Request();
     }

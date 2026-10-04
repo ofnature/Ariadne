@@ -48,6 +48,7 @@ internal sealed class Request
     public float? Tolerance { get; set; }
     public float[]? AvoidCenter { get; set; }
     public float? AvoidRadius { get; set; }
+    public float[][]? Avoid { get; set; } // findPath: [x, y, z, radius] circles for walk legs
     public float[]? Point { get; set; }
     public float? HalfExtentXZ { get; set; }
     public float? HalfExtentY { get; set; }
@@ -103,6 +104,7 @@ internal sealed class ZoneStatusResponse : Response
     public bool Building { get; set; }
     public bool PathfindInProgress { get; set; }
     public int PathfindNumQueued { get; set; }
+    public string? Recapture { get; set; } // with "cached": why a live capture would change the mesh
 }
 
 internal sealed class GetMeshResponse : Response

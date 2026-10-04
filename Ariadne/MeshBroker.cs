@@ -32,6 +32,60 @@ internal sealed class MeshBroker : IDisposable
     }
 
     public Snapshot Current { get; private set; } = Snapshot.Empty;
+
+    /// <summary>Why a live capture would change this zone's mesh (the service's zoneStatus
+    /// `recapture`), or null when it would not. Lights the window's "Capture zone" button.</summary>
+    public string? RecaptureReason { get; private set; }
+
+    /// <summary>Circles every walking route keeps clear of: the hunt marks near the player while
+    /// a consumer holds avoidance on (empty otherwise). Set by the plugin.</summary>
+    public Func<Movement.HuntMarks.Mark[]>? AvoidMarks { get; set; }
+
+    /// <summary>What the service is building right now, as of the last poll: a build of any zone
+    /// (it builds one at a time, for the whole fleet), its 0..1 progress, and whether it is this
+    /// client's zone. Null until the first answer or while nothing is building.</summary>
+    public ServiceBuildState? ServiceBuild { get; private set; }
+
+    public sealed record ServiceBuildState(float Progress, bool ThisZone);
+
+    private long _lastBuildPoll;
+    private int _buildPollBusy;
+
+    /// <summary>Ask the service whether it is building, at most every 2 s; the window calls this
+    /// each frame. A build started by another client, or by a capture, would not show otherwise -
+    /// this client only polls while it is waiting on a build of its own.</summary>
+    public void PollServiceBuild()
+    {
+        var key = _currentKey;
+        var now = Environment.TickCount64;
+        if (key.Length == 0 || !_client.IsConnected || now - _lastBuildPoll < 2000
+            || Interlocked.Exchange(ref _buildPollBusy, 1) == 1)
+            return;
+        _lastBuildPoll = now;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var status = await _client.ZoneStatusAsync(key).ConfigureAwait(false);
+                // the same answer says whether a capture would change this zone's mesh, so the
+                // button follows a rebuilt service or a new customization without a zone change
+                if (status is { Ok: true } && _currentKey == key)
+                    RecaptureReason = status.Status == "cached" ? status.Recapture : null;
+                if (status is { Ok: true })
+                    ServiceBuild = status.Building || status.Status == "building"
+                        ? new ServiceBuildState(Math.Clamp(status.Progress, 0f, 1f), status.Status == "building")
+                        : null;
+            }
+            catch (Exception e) when (e is System.IO.IOException or TimeoutException or OperationCanceledException or ObjectDisposedException)
+            {
+                // no answer this time; the next poll tries again
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _buildPollBusy, 0);
+            }
+        });
+    }
     public bool MnemosyneConnected => _client.IsConnected;
     public string? MnemosyneApp => _client.ServerApp;
 
@@ -90,11 +144,16 @@ internal sealed class MeshBroker : IDisposable
     public void OnZoneChanged(string cacheKey)
     {
         _currentKey = cacheKey;
+        RecaptureReason = null;
         Current = cacheKey.Length == 0
             ? Snapshot.Empty
             : new Snapshot(cacheKey, ZoneMeshStatus.NotReady, null, DateTime.UtcNow);
         if (cacheKey.Length > 0)
+        {
             _ = Task.Run(() => QueryAsync(cacheKey));
+            _ = Task.Run(() => RefreshRecaptureAsync(cacheKey));
+            _ = Task.Run(() => RefreshLocalCopyAsync(cacheKey));
+        }
     }
 
     public Task RefreshAsync()
@@ -172,10 +231,13 @@ internal sealed class MeshBroker : IDisposable
         FindPathResponse? resp;
         try
         {
+            // walk legs only: a flying mount is not aggroed, and the service ignores them for fly
+            var marks = fly ? null : AvoidMarks?.Invoke();
             resp = await _client.FindPathAsync(key, [from.X, from.Y, from.Z], [to.X, to.Y, to.Z], fly,
                 tolerance,
                 avoidCenter is { } c ? [c.X, c.Y, c.Z] : null,
-                avoidRadius).ConfigureAwait(false);
+                avoidRadius,
+                avoid: marks is { Length: > 0 } ? [.. marks.Select(m => new[] { m.Center.X, m.Center.Y, m.Center.Z, m.Radius })] : null).ConfigureAwait(false);
         }
         finally
         {
@@ -442,7 +504,54 @@ internal sealed class MeshBroker : IDisposable
         }
         Activity($"capturing '{key}' on request");
         await WatchUntilReadyAsync(key, WatchMode.Forced).ConfigureAwait(false);
+        await RefreshRecaptureAsync(key).ConfigureAwait(false);
+        await RefreshLocalCopyAsync(key).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>When this client already has a copy of the zone in vnavmesh's cache and the
+    /// service's mesh is newer (a recapture, a rebuild), replace the copy and have vnavmesh load it.
+    /// Ariadne's own moves always ask the service; this keeps vnavmesh, its viewer and anything
+    /// that falls back to it on the same mesh.</summary>
+    private async Task RefreshLocalCopyAsync(string cacheKey)
+    {
+        try
+        {
+            if (_seeder.LocalStatus(cacheKey) != LocalMeshStatus.Current)
+                return; // nothing to replace: the normal seed path handles a missing copy
+            var mesh = await _client.GetMeshAsync(cacheKey).ConfigureAwait(false);
+            if (mesh is not { Ok: true, Path: { } source } || _currentKey != cacheKey)
+                return;
+            var result = _seeder.Refresh(cacheKey, source);
+            if (result != SeedResult.Seeded)
+                return;
+            Activity($"local copy of '{cacheKey}' replaced with Mnemosyne's newer mesh");
+            if (_vnav.IsAvailable)
+            {
+                _vnav.Reload();
+                Activity("vnavmesh reloaded to pick it up");
+            }
+        }
+        catch (Exception e) when (e is System.IO.IOException or TimeoutException or OperationCanceledException or ObjectDisposedException)
+        {
+            // no answer or the file is busy: the next zone change or capture tries again
+        }
+    }
+
+    /// <summary>Ask the service whether a capture would change this zone's mesh. Asked on its
+    /// own because a locally cached zone never calls zoneStatus.</summary>
+    private async Task RefreshRecaptureAsync(string cacheKey)
+    {
+        try
+        {
+            var status = await _client.ZoneStatusAsync(cacheKey).ConfigureAwait(false);
+            if (_currentKey == cacheKey)
+                RecaptureReason = status is { Ok: true, Status: "cached" } ? status.Recapture : null;
+        }
+        catch (Exception e) when (e is System.IO.IOException or TimeoutException or OperationCanceledException or ObjectDisposedException)
+        {
+            // no answer: leave the button as it is
+        }
     }
 
     private const int WatchPollMs = 3000;

@@ -112,13 +112,15 @@ internal sealed class MnemosyneClient : IDisposable
     // pointed at Mnemosyne while vnavmesh is still installed, and the two compared.
 
     public Task<FindPathResponse?> FindPathAsync(string cacheKey, float[] from, float[] to, bool fly,
-        float? tolerance, float[]? avoidCenter, float avoidRadius, CancellationToken cancel = default)
+        float? tolerance, float[]? avoidCenter, float avoidRadius, CancellationToken cancel = default,
+        float[][]? avoid = null)
         => SendAsync<FindPathResponse>(new Request
         {
             Op = "findPath", CacheKey = cacheKey, From = from, To = to, Fly = fly,
             Tolerance = tolerance,
             AvoidCenter = avoidCenter,
             AvoidRadius = avoidCenter == null ? null : avoidRadius,
+            Avoid = avoid,
         }, cancel);
 
     public Task<PointResponse?> NearestPointAsync(string cacheKey, float[] point, float halfExtentXZ, float halfExtentY,

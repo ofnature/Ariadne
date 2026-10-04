@@ -16,9 +16,13 @@ internal sealed class AriadneIpc : IDisposable
 
     public AriadneIpc(IDalamudPluginInterface pluginInterface, MeshBroker broker, Func<string> currentCacheKey,
         Movement.PathFollower follower, Movement.MoveRequest move, Func<int> syncBudgetMs,
-        Func<bool> servesVnavmesh)
+        Func<bool> servesVnavmesh, Movement.HuntMarks hunts)
     {
         _pluginInterface = pluginInterface;
+
+        // hunt-mark avoidance: a hold that lapses unless renewed (consumer-ipc.md)
+        RegisterFunc("Avoid.HuntMarks", (string owner, int seconds) => hunts.Hold(owner, seconds));
+        RegisterFunc("Avoid.HuntMarksActive", () => hunts.Active);
 
         RegisterFunc("IsConnected", () => broker.MnemosyneConnected);
         // True while the vnavmesh.* names are answered by Ariadne (vnavmesh absent, or taken

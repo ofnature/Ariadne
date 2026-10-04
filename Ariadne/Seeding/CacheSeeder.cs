@@ -86,8 +86,29 @@ internal sealed class CacheSeeder
 
         if (LocalStatus(cacheKey) == LocalMeshStatus.Current)
             return SeedResult.AlreadyCurrent;
+        return Copy(TargetPath(cacheKey), sourcePath);
+    }
 
+    /// <summary>Replace this client's copy when Mnemosyne's mesh is newer. Seed never overwrites a
+    /// current copy, so a zone recaptured after it was seeded kept the old copy for good: found
+    /// 2026-10-02 in Kholusia, a 4.8 MB capture that missed a rock cluster left in each client's
+    /// cache after the 6.5 MB recapture. A copy keeps its source's write time, so "newer" is
+    /// exact; a copy vnavmesh built itself after ours is newer still and is kept.</summary>
+    public SeedResult Refresh(string cacheKey, string sourcePath)
+    {
         var target = TargetPath(cacheKey);
+        if (string.Equals(Path.GetFullPath(target), Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase))
+            return SeedResult.AlreadyCurrent; // the service is serving this very file
+        if (!NavmeshHeader.TryRead(sourcePath, out var header) || !header.IsCurrent)
+            return SeedResult.SourceInvalid;
+        var local = new FileInfo(target);
+        if (local.Exists && File.GetLastWriteTimeUtc(sourcePath) <= local.LastWriteTimeUtc)
+            return SeedResult.AlreadyCurrent;
+        return Copy(target, sourcePath);
+    }
+
+    private SeedResult Copy(string target, string sourcePath)
+    {
         var temp = target + ".ariadne-tmp";
         try
         {

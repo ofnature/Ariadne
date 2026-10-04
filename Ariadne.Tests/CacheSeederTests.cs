@@ -74,4 +74,37 @@ public class CacheSeederTests : IDisposable
     {
         Assert.Equal(SeedResult.SourceInvalid, _seeder.Seed("zone_a", Path.Combine(_sourceDir, "nope.navmesh")));
     }
+
+    [Fact]
+    public void Refresh_NewerSource_ReplacesCopy()
+    {
+        var old = WriteMesh(_sourceDir, "zone_a", 25, payload: 0x01);
+        Assert.Equal(SeedResult.Seeded, _seeder.Seed("zone_a", old));
+        var newer = WriteMesh(_sourceDir, "zone_a_new", 25, payload: 0x02);
+        File.SetLastWriteTimeUtc(newer, File.GetLastWriteTimeUtc(old).AddMinutes(5));
+
+        Assert.Equal(SeedResult.AlreadyCurrent, _seeder.Seed("zone_a", newer)); // Seed never replaces
+        Assert.Equal(SeedResult.Seeded, _seeder.Refresh("zone_a", newer));
+        Assert.Equal(File.ReadAllBytes(newer), File.ReadAllBytes(_seeder.TargetPath("zone_a")));
+    }
+
+    [Fact]
+    public void Refresh_SameOrNewerCopy_IsKept()
+    {
+        var source = WriteMesh(_sourceDir, "zone_a", 25, payload: 0x01);
+        Assert.Equal(SeedResult.Seeded, _seeder.Seed("zone_a", source));
+        Assert.Equal(SeedResult.AlreadyCurrent, _seeder.Refresh("zone_a", source));
+
+        // vnavmesh rebuilt it in game after our seed: its file is newer, keep it
+        File.SetLastWriteTimeUtc(_seeder.TargetPath("zone_a"), File.GetLastWriteTimeUtc(source).AddMinutes(5));
+        Assert.Equal(SeedResult.AlreadyCurrent, _seeder.Refresh("zone_a", source));
+    }
+
+    [Fact]
+    public void Refresh_ServiceServesTheLocalFile_DoesNothing()
+    {
+        Directory.CreateDirectory(_cacheDir);
+        var local = WriteMesh(_cacheDir, "zone_a", 25);
+        Assert.Equal(SeedResult.AlreadyCurrent, _seeder.Refresh("zone_a", local));
+    }
 }

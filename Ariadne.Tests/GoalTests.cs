@@ -77,6 +77,20 @@ public class GoalTests
     }
 
     [Fact]
+    public void DescribeEnd_ShortRouteFarBelowAnExactSpot_IsNotArrival()
+    {
+        // Eulmore's aetheryte: the planner said noRouteOnMesh, and the route ended on the
+        // Mainstay floor 34 y under the crystal - which used to report "goal reached"
+        var crystal = new GoalNear(new Vector3(0f, 82f, 0.9f), 0);
+        var floorBelow = new Vector3(0.1f, 48.1f, 0.8f);
+        Assert.StartsWith("closest reachable point", MoveRequest.DescribeEnd(crystal, floorBelow, routeShort: true));
+        // a route the planner said reaches it keeps the guessed-height rule
+        Assert.Equal("goal reached", MoveRequest.DescribeEnd(crystal, floorBelow, routeShort: false));
+        // and a short route ending a yalm or two off in height is still on the spot
+        Assert.Equal("goal reached", MoveRequest.DescribeEnd(crystal, new Vector3(0.2f, 80f, 0.9f), routeShort: true));
+    }
+
+    [Fact]
     public void DistanceOutside_ExactDestination_IgnoresHeight()
     {
         // a spot on the ground: the mesh's height for it is not the caller's

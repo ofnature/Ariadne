@@ -70,6 +70,15 @@ Everything the cache index holds. `cacheKey` is the vnavmesh filename stem
 `stale` = present but header version ≠ current `meshVersion` (or unreadable).
 `building` = a server-side build for this key is running; `progress` is 0..1 (see below).
 
+`recapture?: string` (spec'd 2026-09-30), only with `cached`: a live capture would change the served
+mesh, and why. The builder has a revision number. Each mesh the service writes records the revision
+it was built with, in `<file>.rev`; vnavmesh's files and older files have none and count as 0. The
+field is set when a builder fix since the file's revision applies to this zone. So far there is one:
+revision 2 leaves out collision boxes placed in `*navimesh*` layers (designer navigation scaffolding;
+The Ghimlyt Dark's became a 5,000 m² floor nobody can stand on). It applies to 10 dungeons. Absent
+means a capture would build the same mesh. Ariadne enables its "Capture zone" button only while this
+is set; `/ariadne capture` still forces one.
+
 ### `getMesh`
 `{ cacheKey }` → `{ ok, path: "<absolute path to .navmesh>", version, customization, size }`
 or `ok:false` if missing/stale. Path must stay valid until overwritten by a newer build of
@@ -378,9 +387,12 @@ transitions { cacheKey, near?: [x,y,z], radius?: 0, include?: ["boss", "ambient"
         kind:     "ride" | "slide" | "lift" | "drop" | "hazard"   (+ "boss" | "ambient" when included),
         source:   "zoneFile" | "mesh",
         from:     [x,y,z],       // where it is entered; for a hazard, where it starts
-        to:       [x,y,z],       // where it sets you down; for a hazard, where it lands
-        fromSnap?: [x,y,z],      // nearest walkable point to `from` on the served mesh, within 10 y
-        toSnap?:   [x,y,z],      // same for `to` - the landing to path on from
+        to:       [x,y,z],       // the path's last point; for a hazard, where it lands
+        landing?: [x,y,z],       // carried kinds: the spawn marker (PopRange) within 6 y of `to` -
+                                 // where the game hands the character over
+        fromSnap?: [x,y,z],      // nearest walkable point to the first `enterAt` (else `from`) on the
+                                 // served mesh, within 10 y
+        toSnap?:   [x,y,z],      // same for `landing` (else `to`) - the point to path on from
         path?:    [[x,y,z], ...],// zone-file control points in world space, in travel order
         enterAt?: [ { pos: [x,y,z], shape: "Box"|"Cylinder"|..., scale: [x,y,z], instanceId } ],
         lanes:    int,           // parallel copies merged into this one (a slide has four)
@@ -413,8 +425,28 @@ cliff ledge). Parallel paths of one kind whose ends are within 5 y of each other
 **Mesh checks are always against the served mesh.** `fromSnap`/`toSnap` are computed on the mesh
 this op serves for `cacheKey`, so they agree with `findPath`. A `hazard` whose end is not on
 walkable mesh is reported as `ambient` instead: it comes down, but not where a character stands.
-A slide's `to` is not always on walkable mesh (The Burn's main slide ends off it); `toSnap` is
-where to path on from.
+**Snap from where the game puts you, not from the path's ends.** For a ride, slide or lift, both ends
+of the scripted path can snap to the wrong piece of mesh:
+- *Start.* Xelphatol's first shuttle starts 0.6 y from where characters board, but that point snaps
+  to a separate island the route cannot reach. The trigger circle (`enterAt`) snaps to the walkway,
+  so `fromSnap` comes from the first trigger.
+- *End.* Xelphatol's second shuttle ends 2.8 y above a 15 m² landing pad that terrain walls off from
+  everything, so snapping `to` gives a landing with no way on. The shuttle's spawn marker (a `PopRange`
+  in the same layer, 3.1 y from `to`) sits on the walkway beside the pad, and that walks on to the
+  boss (80 y). So `toSnap` comes from `landing` when there is one.
+
+51 of 71 carried transitions have a marker within 6 y of their end: 0.1 y on four of The Burn's five
+slides, and 3 y on both Xelphatol shuttles. The Burn's first slide's marker is 0.6 y from where a
+character was seen landing. Without a marker, `toSnap` falls back to `to`. A carried transition's `to`
+is on walkable mesh in all but four cases (two slides in The Burn, one in Aloalo Island, one lift in
+Origenics).
+
+**World space.** A scripted path's control points are local to its instance and are placed with
+the same transform as the scene: scale, then rotation X, Y, Z, then translation (row vectors, as
+`LgbSceneReader`). Many paths are stored with X and Z at ±180°. A yaw-pitch-roll composition agrees
+only when those two are zero, and otherwise mirrors the path. Before 2026-09-30 the CLI did this,
+and it put Xelphatol's second shuttle's end 116 y behind it and The Burn's two slide endings 50–57 y
+from where characters land (Theseus's field check, `theseus-for-mnemosyne.md` in the Mnemosyne repo).
 
 **What a consumer does with each.**
 - `ride` / `slide` / `lift`: walk to a point of `enterAt` (or `fromSnap`), step in, stop moving and
@@ -441,17 +473,30 @@ where to path on from.
 
 **Classified results**, same vocabulary as `findPath`: `meshNotReady` (retryable),
 `failed` (unknown zone or bad arguments). An `ok` with an empty list is a real answer: 72 of 111
-dungeons have no ride, slide, lift or hazard at all (measured 2026-09-29).
+dungeons have no ride, slide, lift or hazard at all (measured 2026-09-29, unchanged on 2026-09-30).
 
 **Cost.** Zone files are read once per territory and cached; the mesh checks once per `cacheKey`.
 Both are small: the most any dungeon has is about 130 scripted paths (Lapis Manalis).
 
-**Measured before speccing** (`Mnemosyne.Cli transitions`, 111 dungeons, 2026-09-29): ride 15 in
-10 duties, slide 32 in 14, lift 21 in 9, hazard 53 in 24, boss 138 in 12. Checked by hand against
-Xelphatol (two 59 y shuttles), The Burn (the slide, the drop before the last boss as a four-lane
-slide ending where the route stops short, both boulders) and Mistwake (its slide). `drop` is not in
-that run: it is the island-gap classification `components` already prints, and has been checked on
-The Burn's entrance only.
+**Measured** (`Mnemosyne.Cli transitions`, 111 dungeons, 2026-09-30, with the transform above):
+ride 15 in 10 duties, slide 33 in 14, lift 23 in 9, hazard 52 in 23, boss 138 in 12. Checked against
+where Theseus's characters actually went (2026-09-28/29 runs):
+
+| transition | listed | observed | apart |
+|---|---|---|---|
+| Xelphatol shuttle 1 | from (345.6, 147, −167.2) | boards at (343, 145, −165) | 3.9 y |
+| Xelphatol shuttle 2 | from (411.8, 154.3, −302.8) to (400.5, 154.3, −360.7), heading south | boards at (412, 153, −300); the route goes on south to (341, 167, −408) | 3.1 y at the start; direction agrees |
+| The Burn, slide to the first boss (4 lanes) | to (168.1, 20.4, 236.5) | landed at (168.7, 20.2, 236.3) | 0.7 y |
+| The Burn, into the last arena (4 lanes) | to (−299.0, 10.0, −384.5) | first position on the arena floor (−299.4, 10.0, −384.3) | 0.5 y |
+
+The last of these is a slide, not a ledge drop. The 15 y past its lip with no mesh is the slide's
+own run. The Burn's boulders (three `hazard`s in `LVD_GIMMICK_01`) and Mistwake's slide were checked
+against the zone layout only. `drop` is not in this run: it is the island-gap classification
+`components` already prints, has been checked on The Burn's entrance only, and misses both of The
+Ghimlyt Dark's route drops (open; `theseus-for-mnemosyne.md`, finding 1). Both drops have since
+arrived as field evidence (Theseus's crossing reports, 2026-09-30): (29.3, 59.0, 37.5) → (32.6, 47.6,
+35.7), seen twice, and (370.2, 12.1, −241.5) → (369.5, −15.0, −264.3). A drop rule can be checked
+against those.
 
 **Later: transitions in routes.** `findPath` gains `transitions?: ["slide", "drop", "ride", ...]`,
 the kinds the caller will perform. The planner then treats each as a one-way hop from `fromSnap`
@@ -503,6 +548,15 @@ Request gains the vnavmesh pathfind variants:
   `clearance`: endpoints are never padded, so handing the follower a goal flush against a
   counter makes the final approach graze it.
 
+- `clearance?: <yalms>` (documented 2026-10-04; the service has honoured it since padding
+  landed): how far the route's waypoints and legs are pushed off walls and recorded obstacles
+  (PathPadding). Absent means 1.0 y; 0 turns padding off. Endpoints are never padded. **More is
+  not safer in clutter.** Padding pushes off mesh edges, and a thin pole barely leaves a hole in
+  the mesh. In Amh Araeng's market (2026-10-04), a mounted group stuck on a tent pole, and raising
+  the clearance moved routes toward the poles: the closest pass to a pole centre was 1.55 y at 1.0,
+  1.18 at 1.5, and 0.36 at 2.0, through the 0.4 y pole. Thin solids need to be recorded obstacles,
+  which padding treats as cylinders. So Ariadne does not widen this while mounted.
+
 - `avoidCenter?: [x,y,z]`, `avoidRadius?: <yalms>` — `Nav.PathfindAvoid`. Applies to
   **both ground and fly** legs. Two documented divergences from vnavmesh, both deliberate:
   - vnavmesh only engages avoid when the *straight* `from`→`to` segment enters the circle.
@@ -519,6 +573,29 @@ Request gains the vnavmesh pathfind variants:
     worst answer; the consumer can decide whether to walk it or wait.
   - Flying with avoid bypasses the coarse octree (it has no notion of the circle) and uses
     the voxel search, which is what vnavmesh does for volume paths.
+
+- `avoid?: [[x, y, z, radius], ...]` (spec'd 2026-10-02): several circles at once, for
+  **walk** legs. Added for Ariadne's hunt-mark avoidance: while Odysseus drives MSQ, side
+  quests and aether currents, every route keeps clear of the B/A/S marks near the player.
+  **These circles are a cost, not a wall:** walking inside one costs 25 times as much, so the
+  route goes around wherever a way round exists, and goes through only when none does. Then it
+  answers `result: "avoidIgnored"`. The single circle above is a hard exclusion, and it could not
+  serve here: it rejects every poly whose bounding disc touches the circle, and a field zone's
+  polys are tens of yalms across. In Kholusia a 15 y circle beside the route sealed the slope, and
+  a circle shrunk to keep clear of the goal still covered the goal's own poly. Both answered
+  `avoidIgnored` with the route unchanged. Measured with the soft cost (2026-10-02, Kholusia,
+  (221.9, 24.4, 450.2) → (168.4, 40.1, 567.2)):
+
+  | circles | closest approach | length |
+  |---|---|---|
+  | none | 0.3 y from the circle's centre | 143 y |
+  | one, 15 y | 16.6 y (outside it) | 139 y |
+  | two, 15 y and 12 y | 16.6 y and 22.9 y | 139 y |
+  | one over the goal (shrunk to 2.2 y) | 2.6 y, goal reached | 175 y |
+
+  Each circle is shrunk as the single one is, so none covers the start or the goal (a quest NPC
+  beside an A rank is still reached). It combines with `avoidCenter`/`avoidRadius`, which stays
+  hard. Fly legs ignore it: a mounted, flying character is not aggroed.
 
 `findPath` response gains `result?: string` — why the answer looks the way it does, when
 `ok: true` alone would mislead. Absent means plain success. First member: `"avoidIgnored"`.

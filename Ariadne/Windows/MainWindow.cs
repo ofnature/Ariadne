@@ -479,6 +479,17 @@ internal sealed class MainWindow : Window
 
     private void DrawConfig()
     {
+        ImGui.TextColored(Grey, "Window");
+        Toggle("Edge dock", () => _config.EdgeDockEnabled, v => _config.EdgeDockEnabled = v);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Pins an \"Ariadne\" tab to the edge of the screen, like Daedalus and Charon. Point at it and this\nwindow's contents pop out beside it; click it to keep them out, click again to let them go.\nDocks on the same edge stack. The ordinary window still opens with /ariadne.");
+        if (_config.EdgeDockEnabled)
+        {
+            ImGui.SameLine();
+            Toggle("Right edge", () => _config.EdgeDockRightSide, v => _config.EdgeDockRightSide = v);
+        }
+        ImGui.Separator();
+
         ImGui.TextColored(Grey, "Meshes");
         Toggle("Auto-seed vnavmesh cache on zone load", () => _config.AutoSeed, v => _config.AutoSeed = v);
         Toggle("Build missing meshes (capture → Mnemosyne)", () => _config.BuildOnMiss, v => _config.BuildOnMiss = v);

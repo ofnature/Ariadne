@@ -34,6 +34,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
     private readonly WindowSystem _windowSystem = new("Ariadne");
+    private readonly Windows.Dock.EdgeDockWindow _edgeDock;
+    private readonly Windows.Dock.DockLayoutShare _dockLayout;
     private readonly AriadneConfig _config;
     private readonly ZoneWatcher _zoneWatcher;
     private readonly MeshBroker _broker;
@@ -130,6 +132,14 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
+        // The edge dock: the main window's body behind a sideways tab on a screen edge, stacked with
+        // Daedalus's (order 10) and Charon's (20) when they share the edge.
+        _dockLayout = new Windows.Dock.DockLayoutShare(PluginInterface, "Ariadne", order: 30);
+        _edgeDock = new Windows.Dock.EdgeDockWindow(
+            [new Windows.Dock.EdgeDockWindow.Tab("main", "Ariadne", () => true, () => _mainWindow.Draw(), 560f)],
+            () => _config.EdgeDockRightSide, _dockLayout);
+        _windowSystem.AddWindow(_edgeDock);
+
         _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);
 
         // exception-free readiness for per-frame consumers (Minerva probes once a second and
@@ -192,6 +202,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         {
             _dtr.Dispose();
             _windowSystem.RemoveAllWindows();
+            _dockLayout.Dispose();
         }
         using (Unload("vnavmesh.* gates")) _vnavCompat.Dispose();
         using (Unload("Ariadne.* gates")) _ipc.Dispose();
@@ -229,6 +240,7 @@ public sealed class AriadnePlugin : IDalamudPlugin
         using (MainThreadTrace.Enter("collision overlay")) _collision.Draw();
         using (MainThreadTrace.Enter("mesh overlay")) _meshOverlay.Draw();
         using (MainThreadTrace.Enter("waypoint overlay")) _overlay.Draw();
+        _edgeDock.IsOpen = _config.EdgeDockEnabled && _edgeDock.AnyTab();
         using (MainThreadTrace.Enter("window")) _windowSystem.Draw();
     }
 

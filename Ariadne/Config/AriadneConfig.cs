@@ -124,4 +124,12 @@ public sealed class AriadneConfig : IPluginConfiguration
     /// <summary>Explicit path to Mnemosyne.Service.exe. Empty = read the path Mnemosyne
     /// stamps at <c>%APPDATA%\Mnemosyne\service.path</c> on every run.</summary>
     public string MnemosyneServicePath { get; set; } = "";
+
+    /// <summary>Pin an "Ariadne" tab to a screen edge; pointing at it pops the main window's
+    /// contents out beside it, clicking pins them. Like Daedalus's and Charon's docks, and
+    /// stacked with them on the same edge.</summary>
+    public bool EdgeDockEnabled { get; set; } = false;
+
+    /// <summary>The right edge instead of the left.</summary>
+    public bool EdgeDockRightSide { get; set; } = false;
 }

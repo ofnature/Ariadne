@@ -52,4 +52,19 @@ public class RouteSanityTests
         Assert.Null(RouteSanity.StartOffset(Player, [Player with { Y = Player.Y - RouteSanity.MaxStartOffset }]));
         Assert.NotNull(RouteSanity.StartOffset(Player, [Player with { Y = Player.Y - RouteSanity.MaxStartOffset - 0.1f }]));
     }
+
+    [Fact]
+    public void ARouteThatBeganOnAnotherLevel_LooksForTheSurfaceNearby()
+    {
+        Assert.Equal(RouteSanity.NearbySurfaceRadius, RouteSanity.SurfaceSearchRadius(offTheMesh: false, straightTailMax: 20));
+        Assert.Equal(RouteSanity.NearbySurfaceRadius, RouteSanity.SurfaceSearchRadius(offTheMesh: false, straightTailMax: 0));
+    }
+
+    [Fact]
+    public void AHoleInTheMesh_IsWalkedOutOf_AsFarAsTheStraightStretchAllows()
+    {
+        // the dungeon follower of 2026-10-18: nothing within the planner's 5 y, the leader 13 y away
+        Assert.Equal(20f, RouteSanity.SurfaceSearchRadius(offTheMesh: true, straightTailMax: 20));
+        Assert.Null(RouteSanity.SurfaceSearchRadius(offTheMesh: true, straightTailMax: 0));
+    }
 }

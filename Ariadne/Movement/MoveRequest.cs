@@ -586,8 +586,6 @@ internal sealed class MoveRequest : IDisposable
         return true;
     }
 
-    private const float SurfaceSearchRadius = 6f;
-
     // Ask for the route, and check that it begins where the character stands (RouteSanity).
     // When it begins under the feet, find the surface nearby and plan from there; when there
     // is none, say so instead of handing the follower a route through the ground.
@@ -625,21 +623,39 @@ internal sealed class MoveRequest : IDisposable
     private async Task<MeshBroker.PathAnswer> PlanFromTheSurfaceAsync(Vector3 from, Vector3 to, float? tolerance, bool onTheGround)
     {
         var answer = await _broker.FindPathDetailedAsync(from, to, _fly, tolerance).ConfigureAwait(false);
-        if (!onTheGround || RouteSanity.StartOffset(from, answer.Waypoints) is not { } offset)
+        if (!onTheGround)
+            return answer;
+        // Two ways a walking route fails to begin under the feet: it began on another level, or
+        // there is no mesh within the planner's reach at all (a hole). Either way the character
+        // walks straight to the surface found nearby and the route runs from there - the same
+        // thing the follower does with any first waypoint (RouteSanity.SurfaceSearchRadius).
+        var offTheMesh = answer.Waypoints.Count == 0 && answer.Result == "startOffMesh";
+        var offset = RouteSanity.StartOffset(from, answer.Waypoints);
+        if (!offTheMesh && offset == null)
+            return answer;
+        if (RouteSanity.SurfaceSearchRadius(offTheMesh, _config.StraightTailMax) is not { } radius)
             return answer;
 
-        _log($"[Move] the route begins {RouteSanity.Describe(offset)} at {answer.Waypoints[0]:f1}: the mesh has no "
-            + $"surface where you stand ({from:f1}) and the start fell onto another level â€” looking for the surface nearby");
-        var surface = await _broker.NearestPointAsync(from, SurfaceSearchRadius, RouteSanity.MaxStartOffset, reachableOnly: false)
+        _log(offTheMesh
+            ? $"[Move] no mesh within the planner's reach of where you stand ({from:f1}) - looking for the surface within {radius:0}y"
+            : $"[Move] the route begins {RouteSanity.Describe(offset!.Value)} at {answer.Waypoints[0]:f1}: the mesh has no "
+                + $"surface where you stand ({from:f1}) and the start fell onto another level â€” looking for the surface nearby");
+        var surface = await _broker.NearestPointAsync(from, radius, RouteSanity.MaxStartOffset, reachableOnly: false)
             .ConfigureAwait(false);
         if (surface is { } s && MathF.Abs(s.Y - from.Y) <= RouteSanity.MaxStartOffset)
         {
             var retry = await _broker.FindPathDetailedAsync(s, to, _fly, tolerance).ConfigureAwait(false);
             if (retry.Waypoints.Count > 0 && RouteSanity.StartOffset(from, retry.Waypoints) == null)
             {
-                _log($"[Move] re-planned from the surface at {s:f1}, {Vector3.Distance(s, from):0.0}y from where you stand");
+                _log($"[Move] re-planned from the surface at {s:f1}, {Vector3.Distance(s, from):0.0}y from where you stand"
+                    + (offTheMesh ? " - walking straight to it first" : ""));
                 return retry;
             }
+        }
+        if (offTheMesh)
+        {
+            _log($"[Move] no mesh within {radius:0}y of where you stand at this height");
+            return answer; // startOffMesh, as the planner said
         }
         _log("[Move] no surface within reach to plan from â€” refusing the route that runs on the other level");
         return new MeshBroker.PathAnswer("startOffSurface", [], surface, false);

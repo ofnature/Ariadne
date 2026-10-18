@@ -40,4 +40,22 @@ internal static class RouteSanity
 
     public static string Describe(float offset)
         => offset < 0 ? $"{-offset:0.0}y below your feet" : $"{offset:0.0}y above your head";
+
+    /// <summary>How far around the character a route that began on another level looks for
+    /// the surface they are actually standing on.</summary>
+    public const float NearbySurfaceRadius = 6f;
+
+    /// <summary>How far around the character to look for the mesh when the route cannot
+    /// start where they stand, or null to not look.
+    ///
+    /// <para>Two cases. A route that began on another level (<see cref="StartOffset"/>) means
+    /// the surface is close and the planner picked the wrong one: look nearby. No route at all
+    /// because nothing is within the planner's five-yalm snap (`startOffMesh`) means a hole in
+    /// the mesh around the character, and the walk out of it is a straight stretch over ground
+    /// the mesh does not know — the same guess RouteCompletion makes at the other end of a
+    /// route, so its limit applies, and turning that off turns this off. Seen 2026-10-18: a
+    /// follower stood in such a hole in a dungeon for three minutes, answered "no path" twice
+    /// a second, while the leader waited 13 y away.</para></summary>
+    public static float? SurfaceSearchRadius(bool offTheMesh, float straightTailMax)
+        => !offTheMesh ? NearbySurfaceRadius : straightTailMax > 0 ? straightTailMax : null;
 }

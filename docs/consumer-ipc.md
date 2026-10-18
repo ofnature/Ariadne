@@ -94,6 +94,14 @@ closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. 
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
 
+**A hole in the mesh under the character is walked out of** (2026-10-18). When the planner has
+no mesh within its five-yalm snap of where the character stands (`startOffMesh`), Ariadne-planned
+moves look for the surface at the character's height within `StraightTailMax` (default 20 y) and
+route from there: the first waypoint is that point, and the character walks straight to it. With
+the limit at 0, or no surface within it, the move ends as before with `no path (startOffMesh)`.
+Seen on a dungeon follower that stood in such a hole for three minutes while the leader waited 13 y
+away. `Nav.Pathfind*` is not changed by this.
+
 **When the mesh stops short, the rest is walked straight** (2026-09-29). The meshes are cracked:
 gaps a yalm wide between pieces of ground that is continuous in the game. For moves Ariadne
 plans (`SimpleMove.*` on both surfaces), a route the planner could not finish is completed the

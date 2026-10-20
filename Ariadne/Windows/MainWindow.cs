@@ -482,11 +482,27 @@ internal sealed class MainWindow : Window
         ImGui.TextColored(Grey, "Window");
         Toggle("Edge dock", () => _config.EdgeDockEnabled, v => _config.EdgeDockEnabled = v);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Pins an \"Ariadne\" tab to the edge of the screen, like Daedalus and Charon. Point at it and this\nwindow's contents pop out beside it; click it to keep them out, click again to let them go.\nDocks on the same edge stack. The ordinary window still opens with /ariadne.");
+            ImGui.SetTooltip("Pins an \"Ariadne\" tab to the edge of the screen, like Daedalus and Charon. Point at it and this\nwindow's contents pop out beside it; click it to keep them out, click again to let them go.\nTabs on the same edge sit side by side. The ordinary window still opens with /ariadne.");
         if (_config.EdgeDockEnabled)
         {
             ImGui.SameLine();
-            Toggle("Right edge", () => _config.EdgeDockRightSide, v => _config.EdgeDockRightSide = v);
+            ImGui.SetNextItemWidth(90);
+            var edge = (int)_config.EdgeDockEdge;
+            if (ImGui.Combo("Tab edge", ref edge, "Left\0Right\0Top\0Bottom\0"))
+            {
+                _config.EdgeDockEdge = (Dock.DockEdge)edge;
+                _saveConfig();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Which edge of the screen the tab sits on. You can also drag the tab: let go near any\nedge, anywhere along it, and it stays there.");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Centre"))
+            {
+                _config.EdgeDockAlong = 0.5f;
+                _saveConfig();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Put the tab back in the middle of its edge.");
         }
         ImGui.Separator();
 

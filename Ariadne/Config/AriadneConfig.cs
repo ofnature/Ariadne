@@ -126,10 +126,29 @@ public sealed class AriadneConfig : IPluginConfiguration
     public string MnemosyneServicePath { get; set; } = "";
 
     /// <summary>Pin an "Ariadne" tab to a screen edge; pointing at it pops the main window's
-    /// contents out beside it, clicking pins them. Like Daedalus's and Charon's docks, and
-    /// stacked with them on the same edge.</summary>
+    /// contents out beside it, clicking pins them. Like Daedalus's and Charon's docks, and laid
+    /// out with their tabs so none cover each other.</summary>
     public bool EdgeDockEnabled { get; set; } = false;
 
-    /// <summary>The right edge instead of the left.</summary>
+    /// <summary>The v0.1.9 "Right edge" setting, replaced by <see cref="EdgeDockEdge"/>. Kept only so
+    /// a saved true is carried over once at load (<see cref="MigrateEdgeDock"/>), then cleared.</summary>
     public bool EdgeDockRightSide { get; set; } = false;
+
+    /// <summary>Which screen edge the tab sits on. Dragging the tab changes it.</summary>
+    public Windows.Dock.DockEdge EdgeDockEdge { get; set; } = Windows.Dock.DockEdge.Left;
+
+    /// <summary>Where along that edge the tab's centre sits, 0 = top or left end, 1 = the far end.
+    /// Dragging the tab changes it.</summary>
+    public float EdgeDockAlong { get; set; } = 0.5f;
+
+    /// <summary>Carries the old Right edge setting over to <see cref="EdgeDockEdge"/>. True if it changed anything.</summary>
+    public bool MigrateEdgeDock()
+    {
+        if (!EdgeDockRightSide)
+            return false;
+
+        EdgeDockEdge = Windows.Dock.DockEdge.Right;
+        EdgeDockRightSide = false;
+        return true;
+    }
 }

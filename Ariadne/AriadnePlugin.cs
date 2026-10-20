@@ -132,12 +132,21 @@ public sealed class AriadnePlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position);
         _windowSystem.AddWindow(_mainWindow);
 
-        // The edge dock: the main window's body behind a sideways tab on a screen edge, stacked with
-        // Daedalus's (order 10) and Charon's (20) when they share the edge.
+        // The edge dock: the main window's body behind a tab on a screen edge, with its own edge and spot
+        // along it (dragging stores new ones). The layout is shared with Daedalus's and Charon's tabs so
+        // none cover each other; tabs wanting the same spot put Daedalus first (order 10, Charon 20).
+        if (_config.MigrateEdgeDock())
+            SaveConfig();
         _dockLayout = new Windows.Dock.DockLayoutShare(PluginInterface, "Ariadne", order: 30);
         _edgeDock = new Windows.Dock.EdgeDockWindow(
             [new Windows.Dock.EdgeDockWindow.Tab("main", "Ariadne", () => true, () => _mainWindow.Draw(), 560f)],
-            () => _config.EdgeDockRightSide, _dockLayout);
+            _ => (_config.EdgeDockEdge, _config.EdgeDockAlong),
+            (_, edge, along) =>
+            {
+                (_config.EdgeDockEdge, _config.EdgeDockAlong) = (edge, along);
+                SaveConfig();
+            },
+            _dockLayout);
         _windowSystem.AddWindow(_edgeDock);
 
         _dtr = new DtrProvider(_config, _broker, _follower, _move, _zoneWatcher, OpenMain);

@@ -37,6 +37,10 @@ public sealed class ZoneWatcher : IDisposable
 
     private DateTime _retryAt = DateTime.MinValue;
 
+    // The island's layout changes while the character stands on it (construction). The new
+    // key is adopted once it has held still, so the capture sees the finished building.
+    private readonly IslandSettle _settle = new();
+
     private bool _started;
 
     public ZoneWatcher(IFramework framework) => _framework = framework;
@@ -90,8 +94,9 @@ public sealed class ZoneWatcher : IDisposable
             _retryAt = DateTime.MinValue;
         }
 
-        if (key == CurrentKey)
+        if (_settle.Adopt(CurrentKey, key, DateTime.UtcNow) is not { } adopted)
             return;
+        key = adopted;
 
         Service.Log.Info($"[ZoneWatcher] Transition from '{CurrentKey}' to '{key}'");
         CurrentKey = key;

@@ -63,7 +63,8 @@ public class VendoredParityTests
         var ours = VendoredParity.Normalize(VendoredParity.Ref("Ariadne/Zone/ZoneKey.cs"));
 
         var (refSkeleton, refFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(reference, "string GetCurrentKey("));
-        var (ourSkeleton, ourFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(ours, "string CurrentKey("));
+        // CurrentKey() wraps this and adds the Island Sanctuary tag (IslandLayout); the vendored part is LayoutKey()
+        var (ourSkeleton, ourFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(ours, "string LayoutKey("));
 
         // the file's header: vnavmesh logs this key on every zone change and it must read the same
         Assert.Equal("//////", ourSkeleton); // {Bg}//{filter:X}//{festivals}//{sgs} — three "//" separators
@@ -78,7 +79,8 @@ public class VendoredParityTests
         var ours = VendoredParity.Normalize(VendoredParity.Ref("Ariadne/Zone/ZoneKey.cs"));
 
         var (refSkeleton, refFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(reference, "string GetCacheKey("));
-        var (ourSkeleton, ourFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(ours, "string CurrentCacheKey("));
+        // CurrentCacheKey() wraps this and adds the island tag as a fifth segment; the vendored part is CacheKey()
+        var (ourSkeleton, ourFields) = VendoredParity.Interpolation(VendoredParity.ReturnOf(ours, "string CacheKey("));
 
         // the meshcache filename that milestone 1 verified in-game, byte for byte:
         // {bg with / → _}__{filter:X}__{festivals hex}__{sgs hex}

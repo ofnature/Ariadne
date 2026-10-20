@@ -12,8 +12,32 @@ namespace Ariadne.Zone;
 internal static unsafe class ZoneKey
 {
     // Non-empty iff the active layout is fully loaded. Changes exactly when vnavmesh's
-    // NavmeshManager would start a mesh transition.
+    // NavmeshManager would start a mesh transition - and, on the Island Sanctuary, when the
+    // island's built layout changes (IslandLayout): nothing else in the layout tells one island
+    // from another, or an island from itself before a fence went up.
     public static string CurrentKey()
+    {
+        var key = LayoutKey();
+        return key.Length == 0 ? key : key + IslandPart("//");
+    }
+
+    // The meshcache filename stem for the current zone. Only meaningful when CurrentKey()
+    // is non-empty. The island tag is a fifth segment: everything that reads a key takes the
+    // bg from the first one (Ariadne's seeder and move request, Mnemosyne's zone names and
+    // overrides), so a fifth is invisible to all of them.
+    public static string CurrentCacheKey() => CacheKey() + IslandPart("__");
+
+    private static string IslandPart(string separator)
+    {
+        var layout = LayoutWorld.Instance()->ActiveLayout;
+        var filter = LayoutUtils.FindFilter(layout);
+        var terrId = filter != null ? filter->TerritoryTypeId : layout->TerritoryTypeId;
+        return IslandLayout.Tag(terrId) is { } tag ? separator + tag : "";
+    }
+
+    // ---- vendored from vnavmesh, byte for byte in the returns ----
+
+    internal static string LayoutKey()
     {
         var layout = LayoutWorld.Instance()->ActiveLayout;
         if (layout == null || layout->InitState != 7 || layout->FestivalStatus is > 0 and < 5)
@@ -37,9 +61,7 @@ internal static unsafe class ZoneKey
         return $"{terrRow?.Bg}//{filterKey:X}//{LayoutUtils.FestivalsString(layout->ActiveFestivals)}//{string.Join('.', sgs)}";
     }
 
-    // The meshcache filename stem for the current zone. Only meaningful when CurrentKey()
-    // is non-empty.
-    public static string CurrentCacheKey()
+    internal static string CacheKey()
     {
         var (festivalLayers, zoneSGs) = CollectSceneLite();
 

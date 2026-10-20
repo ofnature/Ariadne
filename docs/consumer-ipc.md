@@ -94,6 +94,19 @@ closes ≥10y earns fresh attempts, and only N consecutive futile ones give up. 
 sees this only as `IsRunning` staying true a little longer; a give-up looks like a
 normal stop.
 
+**The Island Sanctuary is keyed by its built layout** (2026-10-19, asked for by Calypso). On territory
+1055 the cache key carries a fifth segment, `__mji-<hash>`, over the bytes of `MJIManager.IslandState`
+that change what can be walked: village development level, path/ground/slope glamours, cropland and
+pasture (level, under construction), landmarks (id, under construction, rotation), workshops and
+granaries (place, level, under construction), cabin level. Each island is its own mesh, and building
+something is a cache miss captured live by the usual path. A change while standing on the island is
+acted on once the state has held still for 8 s (`IslandSettle`), so the capture sees the finished
+building, not the moment the flag flipped. Consumers see it as a zone change: `ZoneStatus` drops to
+not ready for the few seconds the new key takes to build. The old island's mesh is NOT served
+meanwhile - it is a different key. `Ariadne.CaptureZone` still forces a rebuild under the current
+key; with the layout in the key it is no longer needed to pick up construction, and calling it from
+several clients on their own islands is fine (different keys; the service builds one at a time).
+
 **A hole in the mesh under the character is walked out of** (2026-10-18). When the planner has
 no mesh within its five-yalm snap of where the character stands (`startOffMesh`), Ariadne-planned
 moves look for the surface at the character's height within `StraightTailMax` (default 20 y) and

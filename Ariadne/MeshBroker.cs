@@ -635,7 +635,7 @@ internal sealed class MeshBroker : IDisposable
                         return;
 
                     case WatchAction.SendCapture:
-                        capture ??= await _captureScene(cacheKey).ConfigureAwait(false);
+                        capture ??= await SettledCaptureAsync(cacheKey).ConfigureAwait(false);
                         if (capture == null || capture.CacheKey != cacheKey)
                         {
                             capture = null;
@@ -684,6 +684,36 @@ internal sealed class MeshBroker : IDisposable
             SetProgress(cacheKey, -1);
             lock (_activityLock)
                 _watching.Remove(cacheKey);
+        }
+    }
+
+    /// <summary>A capture of the zone once its layout has stopped growing (<see cref="CaptureSettle"/>):
+    /// one a second, each on the framework thread, until the counts hold. Null when the layout is
+    /// gone or the zone changed meanwhile.</summary>
+    private async Task<Zone.SceneCaptureDto?> SettledCaptureAsync(string cacheKey)
+    {
+        var settle = new CaptureSettle();
+        var started = Stopwatch.StartNew();
+        while (true)
+        {
+            var capture = await _captureScene(cacheKey).ConfigureAwait(false);
+            if (capture == null || capture.CacheKey != cacheKey || _currentKey != cacheKey)
+                return capture;
+            if (settle.Observe(capture.InstanceCount, capture.MeshPaths.Length, DateTime.UtcNow))
+            {
+                if (settle.First is { } first && first != (capture.InstanceCount, capture.MeshPaths.Length))
+                    Activity($"capture settled after {started.Elapsed.TotalSeconds:0}s: {first.Instances} -> {capture.InstanceCount} instances, "
+                        + $"{first.Meshes} -> {capture.MeshPaths.Length} collision meshes still streaming in");
+                return capture;
+            }
+            try
+            {
+                await Task.Delay(1000, _disposeCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
         }
     }
 

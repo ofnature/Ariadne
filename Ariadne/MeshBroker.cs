@@ -576,6 +576,7 @@ internal sealed class MeshBroker : IDisposable
     }
 
     private const int WatchPollMs = 3000;
+    private const int MaxCaptureFailures = 3; // empty captures (a zone mid-reload) before building is given up for the visit
     private const int WatchBudgetMs = 600_000; // a large field zone builds in minutes, and may wait its turn first
 
     /// <summary>The current zone has no usable mesh: watch until one appears, building it if
@@ -601,6 +602,7 @@ internal sealed class MeshBroker : IDisposable
             Zone.SceneCaptureDto? capture = null;
             var wantBuild = force || _buildOnMiss();
             var sends = 0;
+            var captureFailures = 0;
             var sawBuilding = false;
             var idlePolls = 0;
             var started = Stopwatch.StartNew();
@@ -638,7 +640,15 @@ internal sealed class MeshBroker : IDisposable
                         capture ??= await SettledCaptureAsync(cacheKey).ConfigureAwait(false);
                         if (capture == null || capture.CacheKey != cacheKey)
                         {
+                            // A board change reloads the zone under the same key (The Unbroken's second
+                            // board, 2026-10-24): one empty capture there is the layout mid-reload, not
+                            // gone. Giving up on the first one left the zone without a mesh for the visit.
                             capture = null;
+                            if (++captureFailures < MaxCaptureFailures && _currentKey == cacheKey)
+                            {
+                                Activity($"build capture came back empty ({captureFailures}/{MaxCaptureFailures}) — the zone is still loading; trying again");
+                                break;
+                            }
                             wantBuild = false;
                             Activity("build capture failed (layout gone?) — watching for a mesh from elsewhere");
                             break;
@@ -697,8 +707,17 @@ internal sealed class MeshBroker : IDisposable
         while (true)
         {
             var capture = await _captureScene(cacheKey).ConfigureAwait(false);
+            if (_currentKey.Length > 0 && _currentKey != cacheKey)
+                return null; // moved on to another zone
             if (capture == null || capture.CacheKey != cacheKey || _currentKey != cacheKey)
-                return capture;
+            {
+                // the zone is reloading under the same key (a board change): wait it out
+                if (started.Elapsed >= CaptureSettle.MaxWait)
+                    return null;
+                if (!await DelayAsync(1000).ConfigureAwait(false))
+                    return null;
+                continue;
+            }
             if (settle.Observe(capture.InstanceCount, capture.MeshPaths.Length, DateTime.UtcNow))
             {
                 if (settle.First is { } first && first != (capture.InstanceCount, capture.MeshPaths.Length))
@@ -706,14 +725,22 @@ internal sealed class MeshBroker : IDisposable
                         + $"{first.Meshes} -> {capture.MeshPaths.Length} collision meshes still streaming in");
                 return capture;
             }
-            try
-            {
-                await Task.Delay(1000, _disposeCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
+            if (!await DelayAsync(1000).ConfigureAwait(false))
                 return null;
-            }
+        }
+    }
+
+    /// <summary>False when the broker is unloading.</summary>
+    private async Task<bool> DelayAsync(int ms)
+    {
+        try
+        {
+            await Task.Delay(ms, _disposeCts.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 

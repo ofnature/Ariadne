@@ -111,6 +111,27 @@ internal static class ServiceLauncher
         return killed;
     }
 
+    /// <summary>The window's Reset button: back to the service this Ariadne ships, whatever this PC
+    /// was pointed at before. Stops what answers the pipe and forgets the marker; the caller clears
+    /// the configured path. For a machine left on a hand-built or scripted service it no longer
+    /// has a use for (the roommate's PC, 2026-11-15), where Restart would start that one again.
+    /// Returns how many processes stopped.</summary>
+    public static int ResetToBundled(Action<string> log, int? serverPid = null)
+    {
+        var killed = Stop(serverPid, log);
+        try
+        {
+            File.Delete(MarkerPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log($"[Mnemosyne] could not remove the marker at {MarkerPath}: {ex.Message}");
+        }
+        _nextAttempt = DateTime.MinValue; // the pipe is about to be absent: launch on the next connect
+        log($"[Mnemosyne] reset to the bundled service: stopped {killed} process(es) and forgot the marker; the bundled one starts next");
+        return killed;
+    }
+
     /// <summary>Stop every Mnemosyne.Service, and the process actually serving the pipe when it
     /// is known (MnemosyneClient.ServerProcessId) - an old stub or a renamed build answers under
     /// another name, and stopping by name alone leaves it holding the pipe.</summary>

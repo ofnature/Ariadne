@@ -152,6 +152,23 @@ internal sealed class MainWindow : Window
             ImGui.SetTooltip("Stops every Mnemosyne service on this PC; the next connect starts the right one (the\nservice this Ariadne ships, or the build service.path names). Use it when an old service\nkeeps answering after an update. Every game client loses the service for a few seconds,\nand a mesh build in progress is lost."
                 + (_config.AutoStartMnemosyne ? "" : "\n\n\"Start the service when nothing is listening\" is off, so nothing will start it again."));
 
+        ImGui.SameLine();
+        var bundled = BundledService.PayloadDir(ServiceLauncher.PluginDir) != null;
+        ImGui.BeginDisabled(!bundled);
+        if (ImGui.Button("Reset to bundled service"))
+        {
+            _config.MnemosyneServicePath = "";
+            _config.AutoStartMnemosyne = true;
+            _saveConfig();
+            _serviceProbedAt = DateTime.MinValue;
+            ServiceLauncher.ResetToBundled(m => Service.Log.Information(m), _broker.MnemosyneProcessId);
+        }
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(bundled
+                ? "Back to the service this Ariadne ships, whatever this PC was pointed at before: clears\nthe Service exe setting, forgets %APPDATA%\\Mnemosyne\\service.path, turns autostart on,\nand stops whatever answers the pipe. Use it when an old or hand-built service keeps coming\nback after Restart. A script or startup entry that launches its own service must be removed\nfrom Windows too, or it takes the pipe again."
+                : "This Ariadne package carries no service to reset to.");
+
         _broker.PollServiceBuild();
         if (_broker.MnemosyneConnected && _broker.ServiceBuild is { } building)
         {

@@ -40,9 +40,13 @@ internal static class ServiceLauncher
     /// not have to hardcode a build directory.</summary>
     internal static string MarkerPath => Path.Combine(AppDataRoot, "Mnemosyne", "service.path");
 
-    /// <summary>The plugin's own folder — where a package's `service/` payload sits.</summary>
+    /// <summary>The plugin's own folder — where a package's `service/` payload sits. From Dalamud,
+    /// not from the assembly: Dalamud loads plugins in memory, so Assembly.Location is empty there,
+    /// and the payload was never found by an installed Ariadne (greyed-out Reset on the roommate's
+    /// PC, 2026-11-15). The assembly path stays as the fallback for tests and tools.</summary>
     internal static string PluginDir =>
-        Path.GetDirectoryName(typeof(ServiceLauncher).Assembly.Location) ?? "";
+        Service.PluginInterface?.AssemblyLocation?.DirectoryName
+        ?? Path.GetDirectoryName(typeof(ServiceLauncher).Assembly.Location) ?? "";
 
     /// <summary>What autostart would use, why, and whether it has to be staged first.</summary>
     internal readonly record struct Resolution(string? Exe, string Reason, bool NeedsStaging,

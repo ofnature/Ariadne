@@ -188,6 +188,8 @@ public sealed class AriadnePlugin : IDalamudPlugin
         _zoneWatcher.Start();
 
         Log.Information($"Ariadne v{PluginVersion} loaded (vnav cache: {vnavCacheDir}).");
+        Log.Information($"plugin folder: {ServiceLauncher.PluginDir} (assembly location: '{typeof(AriadnePlugin).Assembly.Location}'); "
+            + $"bundled service: {Mnemosyne.BundledService.PayloadDir(ServiceLauncher.PluginDir) ?? "none in this package"}");
     }
 
     // Runs on the game's main thread (the manifest does not allow an async unload), so anything

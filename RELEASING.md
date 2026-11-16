@@ -10,14 +10,14 @@ release — so the extra steps are marked **[FIRST]**. Everything else is the re
 
 | Thing | Value |
 | --- | --- |
-| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.12 |
+| `Ariadne/Ariadne.csproj` `<Version>` | 0.1.13 |
 | `AriadnePlugin.PluginVersion` | derived from the assembly version — nothing to edit |
-| `repo.json` (this repo) `AssemblyVersion` | 0.1.12.0 |
-| GitHub releases / tags | v0.1.12 (2026-11-15) |
-| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.12, visible (`IsHide: false`, `IsTestingExclusive: false`) |
+| `repo.json` (this repo) `AssemblyVersion` | 0.1.13.0 |
+| GitHub releases / tags | v0.1.13 (2026-11-15) |
+| Entry in `D:\Dev\Olympus\repo.json` | Ariadne at v0.1.13, visible (`IsHide: false`, `IsTestingExclusive: false`) |
 | Icon at `images/icon.png` on raw | resolves, HTTP 200 — 256×256, 78 KB since 2026-09-26 (was 512×512, 267 KB) |
-| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — 41.9 MB asset (v0.1.12) |
-| Bundled service in the package | built and staged by step 3; v0.1.2 through v0.1.5 ship Mnemosyne 0.1.0+980a6dc, v0.1.6 ships 0.1.0+6c48ed4, v0.1.7 and v0.1.8 ship 0.1.0+9934e5c, v0.1.9 through v0.1.12 ship 0.1.0+cdda9af (v0.1.1 and earlier: absent). v0.1.5 was bundled from a clean `git worktree` of that commit with `external/` junctioned in, because the checkout's working tree carried uncommitted work |
+| `DownloadLink*` in both manifests | `releases/latest/download/latest.zip` — 41.9 MB asset (v0.1.13) |
+| Bundled service in the package | built and staged by step 3; v0.1.2 through v0.1.5 ship Mnemosyne 0.1.0+980a6dc, v0.1.6 ships 0.1.0+6c48ed4, v0.1.7 and v0.1.8 ship 0.1.0+9934e5c, v0.1.9 through v0.1.13 ship 0.1.0+cdda9af (v0.1.1 and earlier: absent). v0.1.5 was bundled from a clean `git worktree` of that commit with `external/` junctioned in, because the checkout's working tree carried uncommitted work |
 
 ## The two manifests — which one actually matters
 
